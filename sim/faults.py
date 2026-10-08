@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 from typing import Literal
 
@@ -38,6 +39,15 @@ FAULT_DEFECT_LINKS: dict[str, set[str]] = {
     "network_outage": set(),
 }
 
+FAULT_PROCESS = {
+    "drill_abnormal_wear": "drill",
+    "drill_break": "drill",
+    "additive_depletion": "plating",
+    "rectifier_low": "plating",
+    "etch_sg_drift": "etch",
+    "nozzle_clog": "etch",
+}
+
 SENSOR_FAULTS = ("sensor_drift", "sensor_bias", "sensor_spoof")
 
 REMEDIES = {
@@ -57,15 +67,23 @@ class FaultSpec(BaseModel):
     params: dict = {}
 
     @model_validator(mode="after")
-    def _fill_defaults(self) -> "FaultSpec":
+    def _validate(self) -> "FaultSpec":
         if self.type not in FAULT_DEFAULTS:
             raise ValueError(f"未知故障类型: {self.type}")
-        self.params = {**FAULT_DEFAULTS[self.type], **self.params}
+        expected = FAULT_PROCESS.get(self.type)
+        if expected is not None and self.process != expected:
+            raise ValueError(f"{self.type} 只能作用于 {expected}，实际为 {self.process}")
+        if self.end_tick is not None and self.end_tick <= self.start_tick:
+            raise ValueError(f"end_tick {self.end_tick} 必须大于 start_tick {self.start_tick}")
+        unknown = set(self.params) - set(FAULT_DEFAULTS[self.type])
+        if unknown:
+            raise ValueError(f"{self.type} 不支持参数 {sorted(unknown)}")
+        self.params = {**copy.deepcopy(FAULT_DEFAULTS[self.type]), **self.params}
         return self
 
     @property
     def physical(self) -> bool:
-        return self.type not in SENSOR_FAULTS and self.type != "network_outage"
+        return bool(FAULT_DEFECT_LINKS[self.type])
 
 
 class Scenario(BaseModel):
@@ -168,9 +186,7 @@ class FaultInjector:
         elif spec.type in SENSOR_FAULTS:
             sensor_faults.pop((spec.process, spec.params["key"]), None)
         saved = self._saved.pop(spec.fault_id, None)
-        if spec.fault_id in self._cleared:
-            return
-        if saved is not None:
+        if saved is not None and spec.fault_id not in self._cleared:
             station, attr, index, original = saved
             _set(station, attr, index, original)
         self._store.update_fault(spec.fault_id, t_end=t)

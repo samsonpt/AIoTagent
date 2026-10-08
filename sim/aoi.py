@@ -76,6 +76,7 @@ def inspect_lot(
     rng: np.random.Generator,
     active_faults: dict[str, list[FaultSpec]],
 ) -> list[PanelInspection]:
+    del recipe
     out = []
     for k, panel_id in enumerate(panel_ids):
         defects = []

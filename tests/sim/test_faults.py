@@ -48,6 +48,36 @@ def test_fault_spec_rejects_unknown_type():
         FaultSpec(fault_id="F1", type="meteor", process="etch", start_tick=0)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"type": "nozzle_clog", "process": "plating"},
+        {"type": "drill_break", "process": "etch"},
+        {"type": "rectifier_low", "process": "drill"},
+        {"type": "nozzle_clog", "process": "etch", "end_tick": 3},
+        {"type": "nozzle_clog", "process": "etch", "end_tick": 2},
+        {"type": "nozzle_clog", "process": "etch", "params": {"zonee": 1}},
+        {"type": "drill_break", "process": "drill", "params": {"x": 1}},
+    ],
+)
+def test_fault_spec_rejects_invalid_definitions(kwargs):
+    with pytest.raises(ValidationError):
+        FaultSpec(fault_id="F1", start_tick=3, **kwargs)
+
+
+def test_fault_spec_physical_flag_and_free_process_for_sensor_and_network():
+    assert FaultSpec(fault_id="F1", type="nozzle_clog", process="etch", start_tick=0).physical
+    assert not FaultSpec(fault_id="S1", type="sensor_bias", process="plating", start_tick=0).physical
+    assert not FaultSpec(fault_id="N1", type="network_outage", process="drill", start_tick=0).physical
+
+
+def test_fault_spec_defaults_not_shared():
+    a = FaultSpec(fault_id="N1", type="network_outage", process="etch", start_tick=0)
+    a.params["clients"].append("edge-etch")
+    assert FAULT_DEFAULTS["network_outage"] == {"clients": []}
+    assert FaultSpec(fault_id="N2", type="network_outage", process="etch", start_tick=0).params == {"clients": []}
+
+
 def test_defaults_and_links_cover_same_types():
     assert set(FAULT_DEFAULTS) == set(FAULT_DEFECT_LINKS)
     assert FAULT_DEFECT_LINKS["drill_break"] == {"hole_wall", "hole_missing"}
@@ -159,7 +189,7 @@ def test_clear_marks_inactive_and_records():
     inj.apply(9, 16200.0, stations, bus, {})
     assert stations["etch"].clog_factor == [1.0, 1.0, 0.7]
     [rec] = store.faults()
-    assert (rec.t_end, rec.t_cleared, rec.cleared_by) == (None, 3600.0, "edge")
+    assert (rec.t_end, rec.t_cleared, rec.cleared_by) == (16200.0, 3600.0, "edge")
     inj.clear("F1", 5400.0, "machine")
     assert store.faults()[0].t_cleared == 3600.0
     with pytest.raises(KeyError):
