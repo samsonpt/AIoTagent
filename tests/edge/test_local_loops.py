@@ -44,3 +44,18 @@ def test_dose_additive_from_assay():
     )
     assert commands[0]["command"] == "dose_additive"
     assert commands[0]["params"]["ml_l"] == 2.5
+
+
+def test_daily_dose_cap():
+    bus, clock = InMemoryBus(), SimClock()
+    agent = ProcessEdgeAgent("plating", bus, RECIPE, clock)
+    commands = []
+    bus.subscribe(topics.command("plating"), lambda t, p: commands.append(p), "spy")
+    assay = {"t_sample": 0, "t_report": 0, "process": "plating", "values": {"additive_ml_l": 2.0, "cu_g_l": 60.0}}
+    for tick in (0, 3, 6, 9):
+        bus.publish(topics.lab_assay(), {**assay, "tick": tick}, "plant")
+        for _ in range(3):
+            clock.advance_tick()
+            agent.on_tick(clock)
+    doses = [c["params"]["ml_l"] for c in commands if c["command"] == "dose_additive"]
+    assert doses == [2.5, 2.5, 1.0]

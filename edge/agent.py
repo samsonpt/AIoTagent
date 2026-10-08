@@ -1,5 +1,7 @@
 from collections import defaultdict
 
+from sklearn.ensemble import IsolationForest
+
 from bench.schema import EpisodeRecord, TraceStore
 from common import topics
 from common.bus import Bus
@@ -12,6 +14,7 @@ from edge.spc import BASELINE_TICKS, ChannelStats, Ewma, TickAggregator, western
 
 SPOOF_VAR = 1e-12
 COOLDOWN = 3
+DAILY_DOSE_CAP_ML_L = 6.0
 
 
 class ProcessEdgeAgent:
@@ -48,6 +51,8 @@ class ProcessEdgeAgent:
         self._daily_dose = 0.0
         self._dose_day = 0
         self._bit_armed = True
+        self._baseline_vecs: list[list[float]] = []
+        self._iforest: IsolationForest | None = None
         bus.subscribe(topics.telemetry(process), self._on_telemetry, self.client_id)
         if process == "plating":
             bus.subscribe(topics.lab_assay(), self._on_assay, self.client_id)
@@ -55,6 +60,7 @@ class ProcessEdgeAgent:
         if process == "etch":
             bus.subscribe(topics.measurement("etch"), self._on_width, self.client_id)
             bus.subscribe(topics.intents("etch"), self._on_intent, self.client_id)
+            bus.subscribe(topics.aoi_result(), self._on_aoi, self.client_id)
 
     def _on_telemetry(self, topic: str, payload: dict) -> None:
         self._agg.add(int(payload["tick"]), payload["values"])
@@ -92,6 +98,18 @@ class ProcessEdgeAgent:
             mean = sum(col) / len(col)
             if mean < lo:
                 self._handle_signal(int(payload["tick"]), f"width_col_{j}", mean, "width")
+
+    def _on_aoi(self, topic: str, payload: dict) -> None:
+        tick = int(payload["tick"])
+        for panel in payload.get("panels", []):
+            for defect in panel.get("defects", []):
+                if defect.get("stage") != "etch":
+                    continue
+                if defect.get("type") not in {"residue", "short", "width_over", "width_under", "open"}:
+                    continue
+                zone = defect["zone"]
+                col = int(zone[1] if isinstance(zone, (list, tuple)) else zone)
+                self._handle_signal(tick, f"width_col_{col}", 0.0, "aoi")
 
     def _on_intent(self, topic: str, payload: dict) -> None:
         if not self.feedforward or self._confidence != "high":
@@ -152,18 +170,24 @@ class ProcessEdgeAgent:
         for command, params, reason in commands_for(self.process, key, value, self.recipe):
             if command.startswith("set_") and not allow_tune:
                 continue
-            source = "edge"
-            self._publish_command(command, params, source, reason)
-            if self.store is not None:
-                self.store.record_episode(
-                    EpisodeRecord(
-                        episode_id=f"{self.process}-{tick}-{key}",
-                        process=self.process,
-                        trigger=rule,
-                        t_detect=self.clock.now,
-                        handler="edge" if self.emit_commands else "human",
-                    )
+            if command == "dose_additive":
+                remaining = DAILY_DOSE_CAP_ML_L - self._daily_dose
+                params = {**params, "ml_l": min(float(params["ml_l"]), remaining)}
+                if params["ml_l"] <= 0:
+                    continue
+            self._publish_command(command, params, "edge", reason)
+            if command == "dose_additive":
+                self._daily_dose += params["ml_l"]
+        if self.store is not None:
+            self.store.record_episode(
+                EpisodeRecord(
+                    episode_id=f"{self.process}-{tick}-{key}",
+                    process=self.process,
+                    trigger=rule,
+                    t_detect=self.clock.now,
+                    handler="edge" if self.emit_commands else "human",
                 )
+            )
 
     def on_tick(self, clock: SimClock) -> None:
         self.clock = clock
@@ -173,12 +197,23 @@ class ProcessEdgeAgent:
             return
         means = self._agg.mean_of(finished)
         if means is None:
+            for key, left in list(self._cooldown.items()):
+                if left > 0:
+                    self._cooldown[key] = left - 1
             return
         spoof = any(
             (var := self._agg.variance_of(finished, key)) is not None and var < SPOOF_VAR for key in means
         )
-        if self.confidence_modulation and spoof:
-            self._confidence = "low"
+        vec = [means[k] for k in sorted(means)]
+        if len(self._baseline_vecs) < BASELINE_TICKS:
+            self._baseline_vecs.append(vec)
+            if len(self._baseline_vecs) == BASELINE_TICKS:
+                self._iforest = IsolationForest(
+                    n_estimators=50, contamination=0.05, random_state=self.seed
+                ).fit(self._baseline_vecs)
+        elif self.confidence_modulation:
+            forest_low = self._iforest is not None and self._iforest.decision_function([vec])[0] < 0
+            self._confidence = "low" if spoof or forest_low else "high"
         rated = float(self.recipe.constants["bit_rated_life_hits"])
         if self.process == "drill" and means.get("bit_hits", 0) >= 0.9 * rated and self._bit_armed:
             self._publish_command("change_bit", {}, "edge", "钻针接近寿命")
@@ -207,3 +242,6 @@ class ProcessEdgeAgent:
                 rule = "EWMA"
             if rule:
                 self._handle_signal(finished, key, value, rule)
+        for key, left in list(self._cooldown.items()):
+            if key not in means and left > 0:
+                self._cooldown[key] = left - 1

@@ -10,8 +10,13 @@ from bench.metrics import fpr, fpy, scrap_rate
 from bench.schema import TraceStore
 from common.bus import Bus, InMemoryBus
 from common.clock import SimClock
+from common.config import AblationConfig, load_ablation
+from common.recipe import load_recipe
+from edge.factory import make_controllers
 from sim.faults import Scenario, load_scenario
 from sim.plant import Plant
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class Controller(Protocol):
@@ -36,12 +41,19 @@ def run(
     bus: Bus | None = None,
     controllers: Sequence[Controller] = (),
     n_ticks: int | None = None,
+    ablation: AblationConfig | None = None,
 ) -> RunSummary:
     clock = SimClock()
-    plant = Plant(scenario, bus if bus is not None else InMemoryBus(), store, clock)
+    bus = bus if bus is not None else InMemoryBus()
+    plant = Plant(scenario, bus, store, clock)
+    extra = list(controllers)
+    if ablation is not None:
+        recipe_path = Path(scenario.recipe_path)
+        recipe = load_recipe(recipe_path if recipe_path.is_absolute() else ROOT / recipe_path)
+        extra = [*make_controllers(ablation, bus, recipe, clock, store, scenario.seed), *extra]
     for _ in range(scenario.n_ticks if n_ticks is None else n_ticks):
         plant.step_tick()
-        for controller in controllers:
+        for controller in extra:
             controller.on_tick(clock)
     plant.flush_commands()
     fpr_result = fpr(store)
@@ -70,6 +82,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--db", default=":memory:", help="TraceStore SQLite 路径")
     parser.add_argument("--ticks", type=int, default=None, help="覆盖场景的 n_ticks")
     parser.add_argument("--overwrite", action="store_true", help="删除已存在的 --db 文件后再运行")
+    parser.add_argument("--ablation", default=None, help="消融配置 YAML 路径")
     args = parser.parse_args(argv)
     if args.db != ":memory:":
         db = Path(args.db)
@@ -78,7 +91,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         for path in (db, Path(f"{db}-wal"), Path(f"{db}-shm")):
             path.unlink(missing_ok=True)
     with TraceStore(args.db) as store:
-        print(summary_json(run(load_scenario(args.scenario), store, n_ticks=args.ticks)))
+        ablation = load_ablation(args.ablation) if args.ablation else None
+        print(summary_json(run(load_scenario(args.scenario), store, n_ticks=args.ticks, ablation=ablation)))
 
 
 if __name__ == "__main__":

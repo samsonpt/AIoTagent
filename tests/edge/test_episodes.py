@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from bench.schema import TraceStore
 from common import topics
 from common.bus import InMemoryBus
 from common.clock import SimClock
@@ -23,20 +24,36 @@ def tel(bus, tick, sg):
         bus.publish(topics.telemetry("etch"), {"t": tick * 1800.0, "tick": tick, "values": noisy}, "plant")
 
 
-def test_spc_emits_event_and_ocap_commands():
-    bus, clock = InMemoryBus(), SimClock()
-    agent = ProcessEdgeAgent("etch", bus, RECIPE, clock)
-    commands, events = [], []
+def test_sg_ocap_records_episode_and_both_commands():
+    bus, clock, store = InMemoryBus(), SimClock(), TraceStore()
+    agent = ProcessEdgeAgent("etch", bus, RECIPE, clock, store=store)
+    commands = []
     bus.subscribe(topics.command("etch"), lambda t, p: commands.append(p), "spy")
-    bus.subscribe(topics.events("etch"), lambda t, p: events.append(p), "spy")
     for tick in range(8):
         tel(bus, tick, 1.28)
         clock.advance_tick()
         agent.on_tick(clock)
-    assert commands == [] and events == []
     tel(bus, 8, 1.40)
     clock.advance_tick()
     agent.on_tick(clock)
     assert [c["command"] for c in commands] == ["repair_regenerator", "adjust_sg"]
-    assert commands[0]["source"] == "edge"
-    assert events[0]["rule"] == "R1" and events[0]["key"] == "sg" and events[0]["replayed"] is False
+    [episode] = store.episodes()
+    assert episode.episode_id == "etch-8-sg"
+    assert episode.handler == "edge"
+    assert episode.trigger == "R1"
+    assert episode.t_detect == clock.now
+
+
+def test_emit_commands_false_marks_human_handler():
+    bus, clock, store = InMemoryBus(), SimClock(), TraceStore()
+    agent = ProcessEdgeAgent("etch", bus, RECIPE, clock, store=store, emit_commands=False)
+    for tick in range(8):
+        tel(bus, tick, 1.28)
+        clock.advance_tick()
+        agent.on_tick(clock)
+    tel(bus, 8, 1.40)
+    clock.advance_tick()
+    agent.on_tick(clock)
+    [episode] = store.episodes()
+    assert episode.handler == "human"
+    assert agent.emit_commands is False

@@ -13,6 +13,7 @@ from common import topics
 from common.bus import InMemoryBus
 from common.clock import SimClock
 from sim.faults import FAULT_PROCESS, load_scenario
+from common.config import load_ablation
 from sim.runner import RunSummary, run
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -121,6 +122,26 @@ def test_controllers_called_each_tick():
 
     run(load_scenario(SCENARIOS / "nominal.yaml"), TraceStore(), controllers=[Spy()], n_ticks=3)
     assert seen == [1, 2, 3]
+
+
+def test_edge_only_improves_nozzle_clog_fpy():
+    scenario = load_scenario(SCENARIOS / "nozzle_clog.yaml")
+    ablation = load_ablation(ROOT / "bench" / "configs" / "edge_only.yaml")
+    baseline, treated = TraceStore(), TraceStore()
+    raw = run(scenario, baseline)
+    with_edge = run(scenario, treated, ablation=ablation)
+    assert with_edge.fpy > raw.fpy
+
+
+def test_baseline_rule_commands_are_human():
+    scenario = load_scenario(SCENARIOS / "sg_drift.yaml")
+    ablation = load_ablation(ROOT / "bench" / "configs" / "baseline_rule.yaml")
+    store = TraceStore()
+    run(scenario, store, ablation=ablation, n_ticks=20)
+    human = [a for a in store.actions() if a.source == "human"]
+    assert human
+    assert store.episodes()
+    assert human[0].t - min(e.t_detect for e in store.episodes()) >= 3600
 
 
 def test_cli_prints_json(tmp_path):
