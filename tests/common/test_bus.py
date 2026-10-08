@@ -125,6 +125,63 @@ def test_handler_exception_propagates():
         bus.publish("t", {}, "src")
 
 
+def test_handler_exception_clears_queue_and_bus_recovers():
+    bus = InMemoryBus()
+    log = []
+
+    def first(topic, payload):
+        log.append(topic)
+        if topic == "x/1":
+            bus.publish("x/2", {}, "first")
+            raise RuntimeError("boom")
+
+    bus.subscribe("x/+", first, "first")
+    with pytest.raises(RuntimeError, match="boom"):
+        bus.publish("x/1", {}, "src")
+    assert log == ["x/1"]
+
+    assert bus.publish("x/3", {}, "src") is True
+    assert log == ["x/1", "x/3"]
+
+
+class _FakeClient:
+    def __init__(self):
+        self.subscribed = []
+
+    def subscribe(self, pattern):
+        self.subscribed.append(pattern)
+
+    def is_connected(self):
+        return True
+
+
+class _FakeMessage:
+    def __init__(self, topic, payload):
+        self.topic = topic
+        self.payload = payload
+
+
+def test_mqtt_bus_uses_single_broker_filter_and_dispatches_once():
+    bus = MqttBus()
+    fake = _FakeClient()
+    bus._client = fake
+    received = []
+    bus.subscribe("plant/#", lambda t, p: received.append(("a", t)), "a")
+    bus.subscribe("plant/events/+", lambda t, p: received.append(("b", t)), "b")
+    bus.subscribe("plant/events/etch", lambda t, p: received.append(("c", t)), "c")
+    bus._on_connect(fake, None, None, 0, None)
+    bus._on_connect(fake, None, None, 0, None)
+
+    assert fake.subscribed == ["#", "#"]
+
+    bus._on_message(fake, None, _FakeMessage("plant/events/etch", b'{"n": 1}'))
+    assert received == [
+        ("a", "plant/events/etch"),
+        ("b", "plant/events/etch"),
+        ("c", "plant/events/etch"),
+    ]
+
+
 @pytest.mark.skipif("AIOT_MQTT_HOST" not in os.environ, reason="需要设置 AIOT_MQTT_HOST 指向 MQTT broker")
 def test_mqtt_bus_roundtrip():
     bus = MqttBus(host=os.environ["AIOT_MQTT_HOST"], client_name="aiot-test")

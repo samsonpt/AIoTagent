@@ -64,11 +64,16 @@ class InMemoryBus:
                 for pattern, handler, client_id in list(self._subs):
                     if self.is_link_up(client_id) and topic_matches(pattern, topic):
                         handler(topic, copy.deepcopy(payload))
+        except BaseException:
+            self._queue.clear()
+            raise
         finally:
             self._delivering = False
 
 
 class MqttBus:
+    """处理器在 paho 网络线程中被调用，处理器抛出的异常出现在该线程而非 publish 调用方。"""
+
     def __init__(self, host: str = "localhost", port: int = 1883, client_name: str = "aiot") -> None:
         import paho.mqtt.client as mqtt
 
@@ -87,8 +92,8 @@ class MqttBus:
         self._client.loop_start()
 
     def close(self) -> None:
-        self._client.loop_stop()
         self._client.disconnect()
+        self._client.loop_stop()
 
     def set_link(self, client_id: str, up: bool) -> None:
         with self._lock:
@@ -101,8 +106,6 @@ class MqttBus:
     def subscribe(self, pattern: str, handler: Handler, client_id: str) -> None:
         with self._lock:
             self._subs.append((pattern, handler, client_id))
-        if self._client.is_connected():
-            self._client.subscribe(pattern)
 
     def publish(self, topic: str, payload: dict, sender: str) -> bool:
         if not self.is_link_up(sender):
@@ -112,10 +115,8 @@ class MqttBus:
         return True
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
-        with self._lock:
-            patterns = list(dict.fromkeys(p for p, _, _ in self._subs))
-        for pattern in patterns:
-            client.subscribe(pattern)
+        # 重叠的 broker 订阅会让同一消息重复到达，故只订阅单一过滤器，在本地按模式分发
+        client.subscribe("#")
 
     def _on_message(self, client, userdata, message) -> None:
         data = message.payload.decode("utf-8")
