@@ -34,6 +34,13 @@ def test_spec_limit_one_sided():
     assert not s.contains(25.1)
 
 
+def test_violations_formats_numpy_scalars_as_float():
+    recipe = load_recipe(RECIPE_PATH)
+    np = pytest.importorskip("numpy")
+    msgs = recipe.violations("plating", {"additive_ml_l": np.float64(1.31)})
+    assert msgs == ["plating.additive_ml_l=1.31 outside [3.0, 6.0]"]
+
+
 def test_violations_reports_only_defined_params():
     recipe = load_recipe(RECIPE_PATH)
     assert recipe.violations("etch", {"sg": 1.31, "unknown": 1}) == [

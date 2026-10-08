@@ -57,7 +57,7 @@ class Recipe(BaseModel):
         for param, value in params.items():
             w = defined.get(param)
             if w is not None and not w.contains(value):
-                out.append(f"{process}.{param}={value} outside [{w.min}, {w.max}]")
+                out.append(f"{process}.{param}={float(value)} outside [{w.min}, {w.max}]")
         return out
 
 

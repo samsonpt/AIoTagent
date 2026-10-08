@@ -17,6 +17,18 @@ def make_station(seed: int = 7, mismatch: str = "mid") -> EtchStation:
     return EtchStation(RECIPE, mismatch, make_rng(seed, "etch"))
 
 
+def test_initial_state_reads_recipe_windows(tmp_path):
+    text = (ROOT / "bench" / "recipes" / "PN-4L-001.yaml").read_text(encoding="utf-8")
+    text = text.replace("sg: {min: 1.26, max: 1.30, target: 1.28}", "sg: {min: 1.26, max: 1.30, target: 1.27}")
+    path = tmp_path / "r.yaml"
+    path.write_text(text, encoding="utf-8")
+    st = EtchStation(load_recipe(path), "mid", make_rng(0, "etch"))
+    assert st.sg == 1.27
+    assert st.etch_temp_c == 50.0
+    assert st.spray_pressure_bar == 2.0
+    assert st.conveyor_speed_m_min == 2.0
+
+
 def test_initial_state():
     st = make_station()
     assert st.params() == {

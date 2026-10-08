@@ -22,10 +22,10 @@ class EtchStation:
         self._artwork_width_um = recipe.constants["artwork_width_um"]
         self._chamber_length_m = recipe.constants["etch_chamber_length_m"]
         self._etch_factor = recipe.constants["etch_factor"]
-        self.sg = 1.28
-        self.etch_temp_c = 50.0
-        self.spray_pressure_bar = 2.0
-        self.conveyor_speed_m_min = 2.0
+        self.sg = recipe.window("etch", "sg").target
+        self.etch_temp_c = recipe.window("etch", "etch_temp_c").target
+        self.spray_pressure_bar = recipe.window("etch", "spray_pressure_bar").target
+        self.conveyor_speed_m_min = recipe.window("etch", "conveyor_speed_m_min").target
         self.sg_drift_per_tick = 0.0
         self.clog_factor = [1.0, 1.0, 1.0]
         self.stopped = False
