@@ -5,7 +5,7 @@ import numpy as np
 
 from common.recipe import Recipe
 from sim.limits import require
-from sim.mismatch import MISMATCH_SCALE
+from sim.mismatch import mismatch_scale
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class DrillResult:
 class DrillStation:
     def __init__(self, recipe: Recipe, mismatch: str, rng: np.random.Generator):
         self._rng = rng
-        self._m = MISMATCH_SCALE[mismatch]
+        self._m = mismatch_scale(mismatch)
         self._hits_per_lot = int(recipe.constants["hits_per_lot"])
         self._rated_life = int(recipe.constants["bit_rated_life_hits"])
         self._h = float(rng.uniform(-1, 1))

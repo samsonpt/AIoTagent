@@ -4,7 +4,7 @@ import numpy as np
 
 from common.recipe import Recipe
 from sim.limits import require
-from sim.mismatch import MISMATCH_SCALE
+from sim.mismatch import mismatch_scale
 
 NONUNIFORMITY = np.array([[0.03, 0.0, 0.03], [0.0, -0.03, 0.0], [0.03, 0.0, 0.03]])
 PUMP_REFILL_ML_L = 0.3
@@ -20,7 +20,7 @@ class PlatingResult:
 class PlatingStation:
     def __init__(self, recipe: Recipe, mismatch: str, rng: np.random.Generator):
         self._rng = rng
-        self._m = MISMATCH_SCALE[mismatch]
+        self._m = mismatch_scale(mismatch)
         self._lot_size = recipe.lot_size
         self._plating_time_min = recipe.constants["plating_time_min"]
         self._panel_area_dm2 = recipe.constants["panel_area_dm2"]

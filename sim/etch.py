@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from common.recipe import Recipe
-from sim.limits import require
-from sim.mismatch import MISMATCH_SCALE
+from sim.limits import require, require_int
+from sim.mismatch import mismatch_scale
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,7 @@ class EtchResult:
 class EtchStation:
     def __init__(self, recipe: Recipe, mismatch: str, rng: np.random.Generator):
         self._rng = rng
-        self._m = MISMATCH_SCALE[mismatch]
+        self._m = mismatch_scale(mismatch)
         self._artwork_width_um = recipe.constants["artwork_width_um"]
         self._chamber_length_m = recipe.constants["etch_chamber_length_m"]
         self._etch_factor = recipe.constants["etch_factor"]
@@ -81,10 +81,7 @@ class EtchStation:
             case "set_spray_pressure":
                 self.spray_pressure_bar = require(params, "bar", 1.0, 3.0)
             case "clean_nozzle":
-                zone = require(params, "zone", 0, 2)
-                if not zone.is_integer():
-                    raise ValueError(f"zone={zone} must be 0, 1 or 2")
-                self.clog_factor[int(zone)] = 1.0
+                self.clog_factor[require_int(params, "zone", 0, 2)] = 1.0
             case "repair_regenerator":
                 self.sg_drift_per_tick = 0.0
             case "stop":
