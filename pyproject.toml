@@ -24,4 +24,6 @@ include = ["common*", "sim*", "edge*", "twin*", "cloud*", "guard*", "ui*", "benc
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# langsmith 的 pytest 插件在加载时 import requests，环境依赖版本不匹配会在 filterwarnings 生效前输出警告
+addopts = "-q --import-mode=importlib -p no:langsmith_plugin"
+pythonpath = ["."]

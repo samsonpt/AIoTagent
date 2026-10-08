@@ -1,0 +1,27 @@
+part_no: PN-4L-001
+lot_size: 12
+windows:
+  drill:
+    spindle_rpm: {min: 100000, max: 160000, target: 120000}
+    feed_rate_m_min: {min: 1.5, max: 3.0, target: 2.0}
+  plating:
+    current_density_asd: {min: 1.5, max: 2.5, target: 2.0}
+    bath_temp_c: {min: 22.0, max: 28.0, target: 25.0}
+    additive_ml_l: {min: 3.0, max: 6.0, target: 4.5}
+  etch:
+    sg: {min: 1.26, max: 1.30, target: 1.28}
+    etch_temp_c: {min: 48.0, max: 52.0, target: 50.0}
+    spray_pressure_bar: {min: 1.8, max: 2.4, target: 2.0}
+    conveyor_speed_m_min: {min: 1.6, max: 2.4, target: 2.0}
+specs:
+  copper_thickness_um: {min: 20.0, max: 30.0, target: 25.0}
+  line_width_um: {min: 90.0, max: 110.0, target: 100.0}
+  hole_roughness_um: {max: 25.0, target: 15.0}
+constants:
+  hits_per_lot: 600
+  bit_rated_life_hits: 6000
+  plating_time_min: 60
+  artwork_width_um: 121.7
+  etch_chamber_length_m: 2.0
+  etch_factor: 3.0
+  panel_area_dm2: 30.0
