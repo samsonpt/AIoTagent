@@ -1,4 +1,5 @@
 import copy
+import math
 from pathlib import Path
 from typing import Literal
 
@@ -106,7 +107,21 @@ class Scenario(BaseModel):
         ids = [f.fault_id for f in self.faults]
         if len(ids) != len(set(ids)):
             raise ValueError("fault_id 重复")
+        sensors = [f for f in self.faults if f.type in SENSOR_FAULTS]
+        for f in sensors:
+            if not f.params["key"]:
+                raise ValueError(f"传感器故障 {f.fault_id} 缺少 key")
+        for i, a in enumerate(sensors):
+            for b in sensors[i + 1:]:
+                if (a.process, a.params["key"]) == (b.process, b.params["key"]) and _overlap(a, b):
+                    raise ValueError(f"传感器故障 {a.fault_id} 与 {b.fault_id} 作用于同一测点且时间重叠")
         return self
+
+
+def _overlap(a: FaultSpec, b: FaultSpec) -> bool:
+    a_end = math.inf if a.end_tick is None else a.end_tick
+    b_end = math.inf if b.end_tick is None else b.end_tick
+    return a.start_tick < b_end and b.start_tick < a_end
 
 
 def load_scenario(path: str | Path) -> Scenario:

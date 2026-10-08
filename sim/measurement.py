@@ -43,7 +43,7 @@ class Measurement:
             if spec is not None:
                 v = _sensor_fault(spec, v, tick)
             observed[key] = v
-        self._bus.publish(topics.telemetry(process), {"t": t, "values": observed}, SENDER)
+        self._bus.publish(topics.telemetry(process), {"t": t, "tick": tick, "values": observed}, SENDER)
         self._store.record_telemetry(t, process, EQUIPMENT[process], observed)
 
     def schedule_assay(self, t_sample: float, tick: int, values: dict) -> None:
@@ -54,20 +54,22 @@ class Measurement:
         due = [payload for due_tick, payload in self._pending if due_tick <= tick]
         self._pending = [(d, p) for d, p in self._pending if d > tick]
         for payload in due:
-            self._bus.publish(topics.lab_assay(), {**payload, "t_report": t}, SENDER)
+            self._bus.publish(topics.lab_assay(), {**payload, "t_report": t, "tick": tick}, SENDER)
 
-    def publish_lot_measurements(
-        self, t: float, lot_id: str, panel_id: str, thickness_zones: np.ndarray, width_zones: np.ndarray
+    def _publish_zones(
+        self, process: str, kind: str, sigma: float, t: float, tick: int, lot_id: str, panel_id: str, zones: np.ndarray
     ) -> None:
-        for process, kind, zones, sigma in (
-            ("plating", "thickness_um", thickness_zones, 0.3),
-            ("etch", "line_width_um", width_zones, 0.5),
-        ):
-            noisy = np.asarray(zones, dtype=float) + self._rng.normal(0, sigma, size=np.shape(zones))
-            payload = {"t": t, "kind": kind, "lot_id": lot_id, "panel_id": panel_id, "zones": noisy.tolist()}
-            self._bus.publish(topics.measurement(process), payload, SENDER)
+        noisy = np.asarray(zones, dtype=float) + self._rng.normal(0, sigma, size=np.shape(zones))
+        payload = {"t": t, "tick": tick, "kind": kind, "lot_id": lot_id, "panel_id": panel_id, "zones": noisy.tolist()}
+        self._bus.publish(topics.measurement(process), payload, SENDER)
 
-    def publish_aoi(self, t: float, lot_id: str, inspections: list[PanelInspection]) -> None:
+    def publish_thickness(self, t: float, tick: int, lot_id: str, panel_id: str, zones: np.ndarray) -> None:
+        self._publish_zones("plating", "thickness_um", 0.3, t, tick, lot_id, panel_id, zones)
+
+    def publish_width(self, t: float, tick: int, lot_id: str, panel_id: str, zones: np.ndarray) -> None:
+        self._publish_zones("etch", "line_width_um", 0.5, t, tick, lot_id, panel_id, zones)
+
+    def publish_aoi(self, t: float, tick: int, lot_id: str, inspections: list[PanelInspection]) -> None:
         panels = [
             {
                 "panel_id": insp.panel_id,
@@ -75,4 +77,4 @@ class Measurement:
             }
             for insp in inspections
         ]
-        self._bus.publish(topics.aoi_result(), {"t": t, "lot_id": lot_id, "panels": panels}, SENDER)
+        self._bus.publish(topics.aoi_result(), {"t": t, "tick": tick, "lot_id": lot_id, "panels": panels}, SENDER)

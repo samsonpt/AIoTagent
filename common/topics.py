@@ -36,6 +36,10 @@ def line_command() -> str:
     return "plant/line/command"
 
 
+def lot_step(process: str) -> str:
+    return f"plant/mes/{_check(process)}/lot_step"
+
+
 def events(process: str) -> str:
     return f"plant/events/{_check(process)}"
 

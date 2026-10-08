@@ -110,6 +110,26 @@ def test_scenario_defaults():
         Scenario(name="t", seed=1, n_ticks=10, faults=[dup, dup])
 
 
+def sensor(fault_id, start, end=None, key="sg", process="etch"):
+    return {"fault_id": fault_id, "type": "sensor_bias", "process": process, "start_tick": start,
+            "end_tick": end, "params": {"key": key, "offset": 0.1}}
+
+
+def test_scenario_rejects_sensor_fault_without_key():
+    with pytest.raises(ValidationError, match="key"):
+        Scenario(name="t", seed=1, n_ticks=10, faults=[sensor("S1", 0, key="")])
+
+
+def test_scenario_rejects_overlapping_sensor_faults_on_same_key():
+    with pytest.raises(ValidationError, match="重叠"):
+        Scenario(name="t", seed=1, n_ticks=10, faults=[sensor("S1", 0, 5), sensor("S2", 4)])
+    with pytest.raises(ValidationError, match="重叠"):
+        Scenario(name="t", seed=1, n_ticks=10, faults=[sensor("S1", 3), sensor("S2", 0, 4)])
+    Scenario(name="t", seed=1, n_ticks=10, faults=[sensor("S1", 0, 5), sensor("S2", 5)])
+    Scenario(name="t", seed=1, n_ticks=10, faults=[sensor("S1", 0), sensor("S2", 0, key="etch_temp_c")])
+    Scenario(name="t", seed=1, n_ticks=10, faults=[sensor("S1", 0), sensor("S2", 0, process="plating")])
+
+
 def test_load_scenario(tmp_path):
     path = tmp_path / "s.yaml"
     path.write_text(

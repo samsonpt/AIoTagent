@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import time
@@ -8,12 +9,15 @@ from pathlib import Path
 import pytest
 
 from bench.schema import TraceStore
+from common import topics
+from common.bus import InMemoryBus
 from common.clock import SimClock
 from sim.faults import FAULT_PROCESS, load_scenario
 from sim.runner import RunSummary, run
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS = ROOT / "bench" / "scenarios"
+UTF8_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 PHYSICAL = [
     "drill_wear", "additive_depletion", "rectifier_low", "plating_overplate", "sg_drift", "nozzle_clog", "sensor_spoof",
 ]
@@ -67,11 +71,20 @@ def test_network_outage_runs():
     assert store.faults()[0].t_end is not None
 
 
-def test_dump_reproducible():
-    scenario = load_scenario(SCENARIOS / "sensor_spoof.yaml")
+def test_network_outage_blocks_edge_telemetry():
+    bus = InMemoryBus()
+    ticks: set[int] = set()
+    bus.subscribe(topics.telemetry("drill"), lambda t, p: ticks.add(p["tick"]), "edge-drill")
+    run(load_scenario(SCENARIOS / "network_outage.yaml"), TraceStore(), bus=bus, n_ticks=45)
+    assert ticks == set(range(45)) - set(range(20, 40))
+
+
+@pytest.mark.parametrize("name", sorted(p.stem for p in SCENARIOS.glob("*.yaml")))
+def test_dump_reproducible(name):
+    scenario = load_scenario(SCENARIOS / f"{name}.yaml")
     a, b = TraceStore(), TraceStore()
-    run(scenario, a, n_ticks=30)
-    run(scenario, b, n_ticks=30)
+    run(scenario, a, n_ticks=24)
+    run(scenario, b, n_ticks=24)
     assert a.dump() == b.dump()
 
 
@@ -96,10 +109,22 @@ def test_cli_prints_json(tmp_path):
     db = tmp_path / "trace.db"
     proc = subprocess.run(
         [sys.executable, "-m", "sim.runner", str(SCENARIOS / "nominal.yaml"), "--ticks", "8", "--db", str(db)],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=UTF8_ENV,
     )
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout)
     assert out["scenario"] == "nominal" and out["n_panels"] == 60
     assert out["fpr"] is None
     assert db.exists()
+
+
+def test_cli_refuses_existing_db_unless_overwrite(tmp_path):
+    db = tmp_path / "trace.db"
+    db.write_text("old", encoding="utf-8")
+    cmd = [sys.executable, "-m", "sim.runner", str(SCENARIOS / "nominal.yaml"), "--ticks", "4", "--db", str(db)]
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=UTF8_ENV)
+    assert proc.returncode != 0 and "--overwrite" in proc.stderr and proc.stdout == ""
+    assert db.read_text(encoding="utf-8") == "old"
+    proc = subprocess.run([*cmd, "--overwrite"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=UTF8_ENV)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["n_panels"] == 12

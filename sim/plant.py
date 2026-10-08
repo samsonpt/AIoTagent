@@ -1,3 +1,4 @@
+import queue
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from sim.mes import Lot, Mes
 from sim.plating import PlatingResult, PlatingStation
 
 ROOT = Path(__file__).resolve().parents[1]
+SENDER = "plant"
 
 COMMAND_CATEGORY: dict[str, str] = {
     "change_bit": "bit_change",
@@ -71,7 +73,7 @@ class Plant:
         self._measurement = Measurement(scenario, bus, store, self._sensor_faults)
         self._lots: dict[str, _InFlight] = {}
         self._stage: dict[str, _InFlight | None] = {"drill": None, "plating": None, "etch": None}
-        self._applied_tick = -1
+        self._commands: queue.SimpleQueue[tuple[str, dict]] = queue.SimpleQueue()
         self.downtime_ticks = 0
         bus.subscribe("plant/+/+/command", self._on_command, "plant")
         bus.subscribe(topics.line_command(), self._on_command, "plant")
@@ -80,7 +82,8 @@ class Plant:
         clock = self._clock
         tick = clock.tick
         self._injector.apply(tick, clock.now, self.stations, self._bus, self._sensor_faults)
-        self._applied_tick = tick
+        while not self._commands.empty():
+            self._execute(*self._commands.get_nowait())
         self.stations["etch"].tick_update()
 
         sums = {p: {} for p in PROCESSES}
@@ -111,8 +114,11 @@ class Plant:
         return item
 
     def _record(self, item: _InFlight, process: str, tick: int, params: dict, means: dict) -> None:
+        lot_id = item.lot.lot_id
         item.active_faults[process] = self._injector.active(process, tick)
-        self._mes.record_step(item.lot.lot_id, process, {**means[process], **params})
+        self._mes.record_step(lot_id, process, {**means[process], **params})
+        payload = {"t": self._clock.now, "tick": tick, "lot_id": lot_id, "process": process}
+        self._bus.publish(topics.lot_step(process), payload, SENDER)
 
     def _advance_pipeline(self, tick: int, means: dict) -> None:
         t = self._clock.now
@@ -122,22 +128,23 @@ class Plant:
                 item.lot.panel_ids, item.drill, item.plating, item.etch, self._recipe, self._aoi_rng, item.active_faults
             )
             self._mes.finish(item.lot, t, inspections, self._store)
-            self._measurement.publish_lot_measurements(
-                t, item.lot.lot_id, item.lot.panel_ids[0], item.plating.thickness_um[0], item.etch.width_um[0]
-            )
-            self._measurement.publish_aoi(t, item.lot.lot_id, inspections)
+            self._measurement.publish_aoi(t, tick, item.lot.lot_id, inspections)
             del self._lots[item.lot.lot_id]
 
         item = self._take("plating")
         if item is not None:
             item.etch = self.stations["etch"].process_lot(item.lot.lot_id, item.plating.thickness_um)
             self._record(item, "etch", tick, item.etch.params, means)
+            self._measurement.publish_width(t, tick, item.lot.lot_id, item.lot.panel_ids[0], item.etch.width_um[0])
             self._stage["etch"] = item
 
         item = self._take("drill")
         if item is not None:
             item.plating = self.stations["plating"].process_lot(item.lot.lot_id)
             self._record(item, "plating", tick, item.plating.params, means)
+            self._measurement.publish_thickness(
+                t, tick, item.lot.lot_id, item.lot.panel_ids[0], item.plating.thickness_um[0]
+            )
             self._stage["plating"] = item
 
         item = _InFlight(self._mes.release_lot(t))
@@ -146,14 +153,17 @@ class Plant:
         self._record(item, "drill", tick, item.drill.params, means)
         self._stage["drill"] = item
         if item.drill.params["bit_hits"] >= self._rated_life:
-            self._clear_active("drill", "drill_break", "machine")
+            self._clear_active("drill", "drill_break", "machine", tick)
 
-    def _clear_active(self, process: str, fault_type: str, cleared_by: str, zone: int | None = None) -> None:
-        for spec in self._injector.active(process, self._applied_tick):
+    def _clear_active(self, process: str, fault_type: str, cleared_by: str, tick: int, zone: int | None = None) -> None:
+        for spec in self._injector.active(process, tick):
             if spec.type == fault_type and (zone is None or spec.params["zone"] == zone):
                 self._injector.clear(spec.fault_id, self._clock.now, cleared_by)
 
     def _on_command(self, topic: str, payload: dict) -> None:
+        self._commands.put((topic, payload))
+
+    def _execute(self, topic: str, payload: dict) -> None:
         levels = topic.split("/")
         process = levels[1]
         equipment = "line" if process == "line" else levels[2]
@@ -188,7 +198,7 @@ class Plant:
             if accepted and command in REMEDIES:
                 zone = params["zone"] if command == "clean_nozzle" else None
                 for fault_type in REMEDIES[command]:
-                    self._clear_active(process, fault_type, source, zone)
+                    self._clear_active(process, fault_type, source, self._clock.tick, zone)
 
         self._store.record_action(
             ActionRecord(
@@ -211,6 +221,8 @@ class Plant:
         if item is None:
             raise KeyError(f"批次 {lot_id!r} 不存在或已完成")
         if command == "hold_lot":
+            if self._mes.is_held(lot_id):
+                raise ValueError(f"批次 {lot_id} 已被扣留")
             self._mes.hold(lot_id)
         else:
             self._mes.scrap(item.lot, self._clock.now, self._store)

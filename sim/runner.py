@@ -3,6 +3,7 @@ import dataclasses
 import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, Sequence
 
 from bench.metrics import fpr, fpy, scrap_rate
@@ -67,7 +68,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("scenario", help="场景 YAML 路径")
     parser.add_argument("--db", default=":memory:", help="TraceStore SQLite 路径")
     parser.add_argument("--ticks", type=int, default=None, help="覆盖场景的 n_ticks")
+    parser.add_argument("--overwrite", action="store_true", help="删除已存在的 --db 文件后再运行")
     args = parser.parse_args(argv)
+    if args.db != ":memory:":
+        db = Path(args.db)
+        if db.exists() and not args.overwrite:
+            parser.error(f"数据库文件已存在: {db}（如需覆盖请加 --overwrite）")
+        for path in (db, Path(f"{db}-wal"), Path(f"{db}-shm")):
+            path.unlink(missing_ok=True)
     with TraceStore(args.db) as store:
         print(summary_json(run(load_scenario(args.scenario), store, n_ticks=args.ticks)))
 

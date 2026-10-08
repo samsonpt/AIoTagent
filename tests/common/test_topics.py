@@ -15,6 +15,7 @@ def test_fixed_topics():
     assert topics.aoi_result() == "plant/aoi/AOI-01/result"
     assert topics.lab_assay() == "plant/lab/LAB-01/assay"
     assert topics.line_command() == "plant/line/command"
+    assert topics.lot_step("plating") == "plant/mes/plating/lot_step"
 
 
 def test_constants():
@@ -23,7 +24,7 @@ def test_constants():
 
 
 @pytest.mark.parametrize(
-    "fn", [topics.telemetry, topics.command, topics.measurement, topics.events, topics.intents]
+    "fn", [topics.telemetry, topics.command, topics.measurement, topics.events, topics.intents, topics.lot_step]
 )
 def test_unknown_process_raises_key_error(fn):
     with pytest.raises(KeyError):
