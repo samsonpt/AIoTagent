@@ -14,6 +14,7 @@ FAULT_DEFAULTS: dict[str, dict] = {
     "drill_break": {},
     "additive_depletion": {"consumption_multiplier": 2.0},
     "rectifier_low": {"row": 0, "factor": 0.8},
+    "rectifier_high": {"row": 0, "factor": 1.25},
     "etch_sg_drift": {"sg_per_tick": 0.004},
     "nozzle_clog": {"zone": 2, "factor": 0.5},
     "sensor_drift": {"key": "", "per_tick": 0.0},
@@ -31,6 +32,7 @@ FAULT_DEFECT_LINKS: dict[str, set[str]] = {
     "drill_break": _DRILL_DEFECTS,
     "additive_depletion": _PLATING_DEFECTS,
     "rectifier_low": _PLATING_DEFECTS,
+    "rectifier_high": _ETCH_DEFECTS,
     "etch_sg_drift": _ETCH_DEFECTS,
     "nozzle_clog": _ETCH_DEFECTS,
     "sensor_drift": set(),
@@ -44,17 +46,18 @@ FAULT_PROCESS = {
     "drill_break": "drill",
     "additive_depletion": "plating",
     "rectifier_low": "plating",
+    "rectifier_high": "plating",
     "etch_sg_drift": "etch",
     "nozzle_clog": "etch",
 }
 
 SENSOR_FAULTS = ("sensor_drift", "sensor_bias", "sensor_spoof")
 
-REMEDIES = {
-    "clean_nozzle": "nozzle_clog",
-    "repair_rectifier": "rectifier_low",
-    "repair_regenerator": "etch_sg_drift",
-    "change_bit": "drill_break",
+REMEDIES: dict[str, tuple[str, ...]] = {
+    "clean_nozzle": ("nozzle_clog",),
+    "repair_rectifier": ("rectifier_low", "rectifier_high"),
+    "repair_regenerator": ("etch_sg_drift",),
+    "change_bit": ("drill_break",),
 }
 
 
@@ -119,7 +122,7 @@ def _physical_target(spec: FaultSpec) -> tuple[str, int | None, object]:
             return "broken", None, True
         case "additive_depletion":
             return "consumption_multiplier", None, p["consumption_multiplier"]
-        case "rectifier_low":
+        case "rectifier_low" | "rectifier_high":
             return "rect_factor", int(p["row"]), p["factor"]
         case "etch_sg_drift":
             return "sg_drift_per_tick", None, p["sg_per_tick"]

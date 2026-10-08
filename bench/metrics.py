@@ -12,6 +12,7 @@ PHYSICAL_FAULT_TYPES = frozenset(
         "drill_break",
         "additive_depletion",
         "rectifier_low",
+        "rectifier_high",
         "etch_sg_drift",
         "nozzle_clog",
     }

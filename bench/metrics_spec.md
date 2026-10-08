@@ -9,7 +9,7 @@
 1. **`PIPELINE_LATENCY_S = 3 × 1800 = 5400` 秒**：拼板从投产到 AOI 检出的流水线时延（钻孔、电镀、蚀刻三道工序各一个 tick）。故障纠正之后，流水线上仍有已经过故障工序的在制拼板，它们最晚在纠正时刻之后 `PIPELINE_LATENCY_S` 内到达 AOI。模拟器中各工序时延均为 1 个 tick，故该值是窗口的上界。
 2. **M1 的 FPR 纠正时刻近似**：M1 尚无 MTTC 计算，FPR 的纠正时刻 `t_correct` 取 `fault_truth.t_cleared`（处置方清除故障的时刻）；没有则取 `t_end`（场景规定的故障结束时刻）；都没有则为 `+∞`。M7 实现 MTTC 后改用“故障开始 + MTTC”作为纠正时刻。
 3. **`ACTION_WEIGHTS` 中的 `maintenance = 0.3`**：规格只列出参数微调、补药、换针、停线、批次扣留、报废六类权重。`bench/schema.py` 另设 `maintenance` 类别，用于清洗喷嘴、修复整流器、修复再生器等维修动作，权重取 0.3（与换针同级：需要人工或停机干预，但不报废产品）。
-4. **物理故障**：`fault_type` 属于 `bench.metrics.PHYSICAL_FAULT_TYPES` 的故障，即 `sim.faults.FAULT_DEFECT_LINKS` 中缺陷集合非空的类型（`drill_abnormal_wear`、`drill_break`、`additive_depletion`、`rectifier_low`、`etch_sg_drift`、`nozzle_clog`）。传感器故障（`sensor_drift`、`sensor_bias`、`sensor_spoof`）与 `network_outage` 不直接产生缺陷，不计入以“故障”为分母的指标。
+4. **物理故障**：`fault_type` 属于 `bench.metrics.PHYSICAL_FAULT_TYPES` 的故障，即 `sim.faults.FAULT_DEFECT_LINKS` 中缺陷集合非空的类型（`drill_abnormal_wear`、`drill_break`、`additive_depletion`、`rectifier_low`、`rectifier_high`、`etch_sg_drift`、`nozzle_clog`）。传感器故障（`sensor_drift`、`sensor_bias`、`sensor_spoof`）与 `network_outage` 不直接产生缺陷，不计入以“故障”为分母的指标。
 5. **逐缺陷根因**：`panel_lineage.defects[]` 每项含 `cause` 字段，为该缺陷被归因到的故障工序（无归因为 `"none"`）；拼板级 `root_cause_truth` 为第一个非 `"none"` 的 `cause`。旧数据缺少 `cause` 时以拼板级 `root_cause_truth` 代替。
 6. **指令报废**：MES 执行报废指令时，每块拼板写入一条 `type = scrapped_by_command`、`stage = line`、`cause = none` 的缺陷，`t_aoi` 记为报废时刻，`scrapped = true`。
 7. 分母为 0 时指标返回 `nan`，报告中显示为“—”。
@@ -91,7 +91,7 @@
 
 - **定义**：纠正完成前至少产生 1 块 AOI 缺陷拼板的物理故障占比。只统计物理故障（约定 4）。
 - **公式**：对每个物理故障 `f`，`t_correct = f.t_cleared ?? f.t_end ?? +∞`。若存在拼板 `p` 满足 `p.root_cause_truth = f.process` 且 `f.t_start ≤ p.t_aoi ≤ t_correct + PIPELINE_LATENCY_S`，则 `f` 为“传播”。`FPR = #传播故障 ÷ #物理故障`。窗口右端是上界（约定 1：模拟器中三道工序时延均为 1 个 tick）。
-- **跨工序传播比例**：在所有 `cause ≠ "none"` 的缺陷中，`defect.stage ≠ defect.cause` 的缺陷占比（例如电镀故障导致的蚀刻阶段缺陷）。按逐缺陷根因计算（约定 5），背景缺陷不计入。
+- **跨工序传播比例**：在所有 `cause ≠ "none"` 的缺陷中，`defect.stage ≠ defect.cause` 的缺陷占比（例如电镀故障导致的蚀刻阶段缺陷）。按逐缺陷根因计算（约定 5），背景缺陷（AOI 随机缺陷，`cause = "none"`）不计入。M1 中跨工序缺陷由 `rectifier_high`（过镀铜层 → 蚀刻残铜/短路）产生；`additive_depletion` 在当前蚀刻模型下只产生同工序的 `thin_copper`，跨工序比例为 0。
 - **数据来源**：`fault_truth.fault_type / process / t_start / t_end / t_cleared`；`panel_lineage.t_aoi / root_cause_truth / defects[].stage / defects[].cause`。
 - **表 IV 维度**：FPR。
 - **实现里程碑**：已实现（M1），`fpr` 返回 `FprResult(fpr, cross_process_ratio, n_faults)`；M7 将 `t_correct` 改为基于 MTTC（约定 2）。

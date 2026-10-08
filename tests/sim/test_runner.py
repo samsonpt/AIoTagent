@@ -14,7 +14,9 @@ from sim.runner import RunSummary, run
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS = ROOT / "bench" / "scenarios"
-PHYSICAL = ["drill_wear", "additive_depletion", "rectifier_low", "sg_drift", "nozzle_clog", "sensor_spoof"]
+PHYSICAL = [
+    "drill_wear", "additive_depletion", "rectifier_low", "plating_overplate", "sg_drift", "nozzle_clog", "sensor_spoof",
+]
 
 
 @cache
@@ -49,9 +51,14 @@ def test_physical_faults_lower_fpy_with_correct_root_cause(name):
     assert sum(c in expected for c in causes) / len(causes) >= 0.9
 
 
-def test_additive_depletion_cross_process():
+def test_plating_overplate_cross_process():
+    summary, _ = result("plating_overplate")
+    assert summary.cross_process_ratio > 0.5
+
+
+def test_additive_depletion_has_no_cross_process_defects():
     summary, _ = result("additive_depletion")
-    assert summary.cross_process_ratio > 0
+    assert summary.cross_process_ratio == 0
 
 
 def test_network_outage_runs():

@@ -54,6 +54,8 @@ def test_fault_spec_rejects_unknown_type():
         {"type": "nozzle_clog", "process": "plating"},
         {"type": "drill_break", "process": "etch"},
         {"type": "rectifier_low", "process": "drill"},
+        {"type": "rectifier_high", "process": "etch"},
+        {"type": "rectifier_high", "process": "plating", "params": {"gain": 2}},
         {"type": "nozzle_clog", "process": "etch", "end_tick": 3},
         {"type": "nozzle_clog", "process": "etch", "end_tick": 2},
         {"type": "nozzle_clog", "process": "etch", "params": {"zonee": 1}},
@@ -85,11 +87,13 @@ def test_defaults_and_links_cover_same_types():
     assert FAULT_DEFECT_LINKS["network_outage"] == set()
     assert "thin_copper" in FAULT_DEFECT_LINKS["rectifier_low"]
     assert "thin_copper" not in FAULT_DEFECT_LINKS["nozzle_clog"]
+    assert FAULT_DEFECT_LINKS["rectifier_high"] == {"width_under", "width_over", "open", "residue", "short"}
+    assert FAULT_DEFAULTS["rectifier_high"] == {"row": 0, "factor": 1.25}
     assert REMEDIES == {
-        "clean_nozzle": "nozzle_clog",
-        "repair_rectifier": "rectifier_low",
-        "repair_regenerator": "etch_sg_drift",
-        "change_bit": "drill_break",
+        "clean_nozzle": ("nozzle_clog",),
+        "repair_rectifier": ("rectifier_low", "rectifier_high"),
+        "repair_regenerator": ("etch_sg_drift",),
+        "change_bit": ("drill_break",),
     }
 
 
@@ -125,6 +129,7 @@ def test_load_scenario(tmp_path):
         ({"type": "drill_break", "process": "drill"}, lambda st: st["drill"].broken is True),
         ({"type": "additive_depletion", "process": "plating"}, lambda st: st["plating"].consumption_multiplier == 2.0),
         ({"type": "rectifier_low", "process": "plating", "params": {"row": 1}}, lambda st: st["plating"].rect_factor == [1.0, 0.8, 1.0]),
+        ({"type": "rectifier_high", "process": "plating"}, lambda st: st["plating"].rect_factor == [1.25, 1.0, 1.0]),
         ({"type": "etch_sg_drift", "process": "etch"}, lambda st: st["etch"].sg_drift_per_tick == 0.004),
         ({"type": "nozzle_clog", "process": "etch"}, lambda st: st["etch"].clog_factor == [1.0, 1.0, 0.5]),
     ],

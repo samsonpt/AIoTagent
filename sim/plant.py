@@ -187,7 +187,8 @@ class Plant:
                 reason = str(e)
             if accepted and command in REMEDIES:
                 zone = params["zone"] if command == "clean_nozzle" else None
-                self._clear_active(process, REMEDIES[command], source, zone)
+                for fault_type in REMEDIES[command]:
+                    self._clear_active(process, fault_type, source, zone)
 
         self._store.record_action(
             ActionRecord(

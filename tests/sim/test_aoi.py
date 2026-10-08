@@ -138,6 +138,34 @@ def test_defect_cause_attributed_per_defect():
     assert Defect("open", (0, 0), "etch").cause == "none"
 
 
+class AlwaysBackground:
+    def random(self):
+        return 0.0
+
+    def integers(self, n):
+        return 0
+
+
+def test_background_defect_never_attributed():
+    active = {"plating": [fault("P1", "rectifier_low", "plating")], "etch": [fault("E1", "nozzle_clog", "etch")]}
+    [insp] = inspect_lot(ids(), *results(), RECIPE, AlwaysBackground(), active)
+    assert insp.defects == [Defect("residue", (0, 0), "etch", "none")]
+    assert insp.root_cause_truth == "none"
+    drill, plating, etch = results()
+    plating.thickness_um[0, 1, 1] = 18.0
+    [insp] = inspect_lot(ids(), drill, plating, etch, RECIPE, AlwaysBackground(), active)
+    assert [(d.type, d.cause) for d in insp.defects] == [("thin_copper", "plating"), ("residue", "none")]
+    assert insp.root_cause_truth == "plating"
+
+
+def test_rectifier_high_overplate_attributed_to_plating():
+    drill, plating, etch = results(thickness=31.5, overetch=-1.5)
+    active = {"plating": [fault("P1", "rectifier_high", "plating")]}
+    insp = inspect_one(drill, plating, etch, active)
+    assert {(d.type, d.stage, d.cause) for d in insp.defects} == {("residue", "etch", "plating")}
+    assert insp.root_cause_truth == "plating"
+
+
 def test_background_defects_reproducible_by_seed():
     n = 2000
     args = (ids(n), *results(n))

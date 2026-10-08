@@ -65,6 +65,15 @@ def test_clean_nozzle_clears_matching_zone_only():
     assert plant.stations["etch"].clog_factor == [1.0, 1.0, 1.0]
 
 
+def test_repair_rectifier_clears_rectifier_high():
+    plant, bus, store, _ = make({"fault_id": "F1", "type": "rectifier_high", "process": "plating", "start_tick": 0})
+    plant.step_tick()
+    assert plant.stations["plating"].rect_factor == [1.25, 1.0, 1.0]
+    send(bus, "plating", "repair_rectifier")
+    assert store.faults()[0].cleared_by == "edge"
+    assert plant.stations["plating"].rect_factor == [1.0, 1.0, 1.0]
+
+
 def test_remedy_before_fault_activation_is_harmless():
     plant, bus, store, _ = make({"fault_id": "F1", "type": "nozzle_clog", "process": "etch", "start_tick": 1})
     plant.step_tick()

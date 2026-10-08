@@ -89,10 +89,10 @@ def inspect_lot(
             defects.append(_defect("hole_missing", 0, 0))
         elif drill.roughness_um > 25:
             defects.append(_defect("hole_wall", 0, 0))
+        defects = [replace(d, cause=_root_cause(d, active_faults)) for d in defects]
         if rng.random() < BACKGROUND_DEFECT_PROB:
             t = BACKGROUND_TYPES[rng.integers(len(BACKGROUND_TYPES))]
             defects.append(_defect(t, rng.integers(3), rng.integers(3)))
-        defects = [replace(d, cause=_root_cause(d, active_faults)) for d in defects]
         out.append(
             PanelInspection(
                 panel_id=panel_id,
