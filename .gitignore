@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+runs/
+bench/results/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Agent workflow scratch
+.worktrees/
+.superpowers/
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
