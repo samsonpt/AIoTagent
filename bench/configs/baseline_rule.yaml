@@ -1,0 +1,3 @@
+name: baseline_rule
+use_edge_agent: false
+use_cloud: false
