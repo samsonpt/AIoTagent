@@ -1,0 +1,6 @@
+name: drill_wear
+seed: 42
+n_ticks: 96
+model_mismatch: mid
+faults:
+  - {fault_id: F1, type: drill_abnormal_wear, process: drill, start_tick: 10}

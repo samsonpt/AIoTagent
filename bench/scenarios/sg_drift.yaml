@@ -1,0 +1,6 @@
+name: sg_drift
+seed: 42
+n_ticks: 96
+model_mismatch: mid
+faults:
+  - {fault_id: F1, type: etch_sg_drift, process: etch, start_tick: 10}

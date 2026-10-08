@@ -1,0 +1,6 @@
+name: rectifier_low
+seed: 42
+n_ticks: 96
+model_mismatch: mid
+faults:
+  - {fault_id: F1, type: rectifier_low, process: plating, start_tick: 10, params: {row: 0, factor: 0.75}}

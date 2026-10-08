@@ -1,0 +1,6 @@
+name: network_outage
+seed: 42
+n_ticks: 96
+model_mismatch: mid
+faults:
+  - {fault_id: N1, type: network_outage, process: network, start_tick: 20, end_tick: 40, params: {clients: [edge-drill, edge-plating, edge-etch, cloud]}}

@@ -1,0 +1,6 @@
+name: additive_depletion
+seed: 42
+n_ticks: 96
+model_mismatch: mid
+faults:
+  - {fault_id: F1, type: additive_depletion, process: plating, start_tick: 10}

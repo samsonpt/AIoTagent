@@ -1,0 +1,5 @@
+name: nominal
+seed: 42
+n_ticks: 96
+model_mismatch: mid
+faults: []
