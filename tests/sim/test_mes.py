@@ -44,7 +44,7 @@ def test_finish_writes_panel_lineage():
         PanelInspection(pid, [], "none", False) for pid in lot.panel_ids
     ]
     inspections[1] = PanelInspection(
-        lot.panel_ids[1], [Defect("open", (2, 1), "etch"), Defect("hole_wall", (0, 0), "drill")], "etch", True
+        lot.panel_ids[1], [Defect("open", (2, 1), "etch", "etch"), Defect("hole_wall", (0, 0), "drill")], "etch", True
     )
     store = TraceStore()
     mes.finish(lot, 9000.0, inspections, store)
@@ -60,8 +60,8 @@ def test_finish_writes_panel_lineage():
         plating={"current_density_asd": 2.0},
         etch={"sg": 1.28},
         defects=[
-            {"type": "open", "zone": [2, 1], "stage": "etch"},
-            {"type": "hole_wall", "zone": [0, 0], "stage": "drill"},
+            {"type": "open", "zone": [2, 1], "stage": "etch", "cause": "etch"},
+            {"type": "hole_wall", "zone": [0, 0], "stage": "drill", "cause": "none"},
         ],
         root_cause_truth="etch",
         scrapped=True,
@@ -85,7 +85,7 @@ def test_scrap_writes_scrapped_records():
     panels = store.panels()
     assert len(panels) == 12
     for p in panels:
-        assert p.defects == [{"type": "scrapped_by_command", "zone": [0, 0], "stage": "line"}]
+        assert p.defects == [{"type": "scrapped_by_command", "zone": [0, 0], "stage": "line", "cause": "none"}]
         assert p.root_cause_truth == "none"
         assert p.scrapped
         assert p.t_aoi == 3600.0

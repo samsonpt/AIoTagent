@@ -91,6 +91,18 @@ def test_fpr_ignores_defects_after_cleared_plus_latency(store):
     assert fpr(store).fpr == 1.0
 
 
+def test_fpr_falls_back_to_t_end(store):
+    store.record_fault(make_fault("F1", "nozzle_clog", "etch", 0.0, t_end=3600.0))
+    store.record_panel(
+        make_panel("L0005-P01", t_aoi=3600.0 + PIPELINE_LATENCY_S + 1.0, defects=[("open", "etch")], root="etch")
+    )
+    assert fpr(store).fpr == 0.0
+    store.record_panel(
+        make_panel("L0004-P01", t_aoi=3600.0 + PIPELINE_LATENCY_S, defects=[("open", "etch")], root="etch")
+    )
+    assert fpr(store).fpr == 1.0
+
+
 def test_fpr_ignores_defects_before_fault_start(store):
     store.record_fault(make_fault("F1", "nozzle_clog", "etch", 3600.0))
     store.record_panel(make_panel("L0001-P01", t_aoi=1800.0, defects=[("open", "etch")], root="etch"))
@@ -111,3 +123,12 @@ def test_cross_process_ratio(store):
     store.record_panel(make_panel("L0001-P02", defects=[("open", "etch")], root="etch"))
     store.record_panel(make_panel("L0001-P03", defects=[("residue", "etch")]))
     assert fpr(store).cross_process_ratio == pytest.approx(1 / 3)
+
+
+def test_cross_process_ratio_uses_per_defect_cause(store):
+    panel = make_panel("L0001-P01", defects=[("width_under", "etch"), ("residue", "etch")], root="plating")
+    panel.defects[0]["cause"] = "plating"
+    panel.defects[1]["cause"] = "none"
+    store.record_panel(panel)
+    store.record_panel(make_panel("L0002-P01", defects=[("open", "etch")], root="etch"))
+    assert fpr(store).cross_process_ratio == pytest.approx(1 / 2)

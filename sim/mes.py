@@ -4,7 +4,7 @@ from bench.schema import PanelRecord, TraceStore
 from common.recipe import Recipe
 from sim.aoi import PanelInspection
 
-SCRAP_DEFECT = {"type": "scrapped_by_command", "zone": [0, 0], "stage": "line"}
+SCRAP_DEFECT = {"type": "scrapped_by_command", "zone": [0, 0], "stage": "line", "cause": "none"}
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,7 @@ class Mes:
         if [i.panel_id for i in inspections] != lot.panel_ids:
             raise ValueError(f"{lot.lot_id} 检测结果与拼板不一致")
         for insp in inspections:
-            defects = [{"type": d.type, "zone": list(d.zone), "stage": d.stage} for d in insp.defects]
+            defects = [{"type": d.type, "zone": list(d.zone), "stage": d.stage, "cause": d.cause} for d in insp.defects]
             self._record(lot, insp.panel_id, t_aoi, defects, insp.root_cause_truth, insp.scrapped, store)
 
     def scrap(self, lot: Lot, t: float, store: TraceStore) -> None:

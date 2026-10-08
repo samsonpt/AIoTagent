@@ -50,9 +50,10 @@ def fpr(store: TraceStore) -> FprResult:
             for p in panels
         ):
             propagated += 1
-    stages = [(d["stage"], p.root_cause_truth) for p in panels if p.root_cause_truth != "none" for d in p.defects]
+    caused = [(d["stage"], d.get("cause", p.root_cause_truth)) for p in panels for d in p.defects]
+    caused = [(stage, cause) for stage, cause in caused if cause != "none"]
     return FprResult(
         fpr=_ratio(propagated, len(faults)),
-        cross_process_ratio=_ratio(sum(1 for stage, root in stages if stage != root), len(stages)),
+        cross_process_ratio=_ratio(sum(1 for stage, cause in caused if stage != cause), len(caused)),
         n_faults=len(faults),
     )

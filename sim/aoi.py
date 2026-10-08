@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -27,6 +27,7 @@ class Defect:
     type: str
     zone: tuple[int, int]
     stage: str
+    cause: str = "none"
 
 
 @dataclass(frozen=True)
@@ -91,12 +92,12 @@ def inspect_lot(
         if rng.random() < BACKGROUND_DEFECT_PROB:
             t = BACKGROUND_TYPES[rng.integers(len(BACKGROUND_TYPES))]
             defects.append(_defect(t, rng.integers(3), rng.integers(3)))
-        causes = [_root_cause(d, active_faults) for d in defects]
+        defects = [replace(d, cause=_root_cause(d, active_faults)) for d in defects]
         out.append(
             PanelInspection(
                 panel_id=panel_id,
                 defects=defects,
-                root_cause_truth=next((c for c in causes if c != "none"), "none"),
+                root_cause_truth=next((d.cause for d in defects if d.cause != "none"), "none"),
                 scrapped=any(d.type in SCRAP_TYPES for d in defects),
             )
         )

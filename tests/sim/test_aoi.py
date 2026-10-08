@@ -124,6 +124,20 @@ def test_root_cause_ignores_sensor_faults_and_uses_first_attributed_defect():
     assert insp.root_cause_truth == "drill"
 
 
+def test_defect_cause_attributed_per_defect():
+    drill, plating, etch = results(roughness=26.0)
+    etch.width_um[0, 0, 0] = 87.0
+    plating.thickness_um[0, 1, 1] = 18.0
+    active = {"plating": [fault("P1", "rectifier_low", "plating")]}
+    insp = inspect_one(drill, plating, etch, active)
+    assert [(d.type, d.cause) for d in insp.defects] == [
+        ("width_under", "plating"),
+        ("thin_copper", "plating"),
+        ("hole_wall", "none"),
+    ]
+    assert Defect("open", (0, 0), "etch").cause == "none"
+
+
 def test_background_defects_reproducible_by_seed():
     n = 2000
     args = (ids(n), *results(n))
