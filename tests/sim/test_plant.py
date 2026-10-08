@@ -115,13 +115,17 @@ def test_repair_rectifier_clears_rectifier_high():
     assert plant.stations["plating"].rect_factor == [1.0, 1.0, 1.0]
 
 
-def test_queued_command_runs_after_fault_injection():
+def test_preemptive_remedy_does_not_clear_fault_injected_this_tick():
     plant, bus, store, _ = make({"fault_id": "F1", "type": "nozzle_clog", "process": "etch", "start_tick": 1})
     steps(plant)
     send(bus, "etch", "clean_nozzle", {"zone": 2})
     steps(plant)
     [f] = store.faults()
-    assert (f.t_start, f.t_cleared) == (1800.0, 1800.0)
+    assert f.t_start == 1800.0 and f.t_cleared is None
+    assert plant.stations["etch"].clog_factor[2] == 0.5
+    send(bus, "etch", "clean_nozzle", {"zone": 2})
+    steps(plant)
+    assert store.faults()[0].t_cleared == 3600.0
     assert plant.stations["etch"].clog_factor == [1.0, 1.0, 1.0]
 
 

@@ -78,12 +78,15 @@ class Plant:
         bus.subscribe("plant/+/+/command", self._on_command, "plant")
         bus.subscribe(topics.line_command(), self._on_command, "plant")
 
+    def flush_commands(self) -> None:
+        while not self._commands.empty():
+            self._execute(*self._commands.get_nowait())
+
     def step_tick(self) -> None:
         clock = self._clock
         tick = clock.tick
+        self.flush_commands()
         self._injector.apply(tick, clock.now, self.stations, self._bus, self._sensor_faults)
-        while not self._commands.empty():
-            self._execute(*self._commands.get_nowait())
         self.stations["etch"].tick_update()
 
         sums = {p: {} for p in PROCESSES}
@@ -198,7 +201,7 @@ class Plant:
             if accepted and command in REMEDIES:
                 zone = params["zone"] if command == "clean_nozzle" else None
                 for fault_type in REMEDIES[command]:
-                    self._clear_active(process, fault_type, source, self._clock.tick, zone)
+                    self._clear_active(process, fault_type, source, self._clock.tick - 1, zone)
 
         self._store.record_action(
             ActionRecord(

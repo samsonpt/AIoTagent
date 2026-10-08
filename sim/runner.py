@@ -43,6 +43,7 @@ def run(
         plant.step_tick()
         for controller in controllers:
             controller.on_tick(clock)
+    plant.flush_commands()
     fpr_result = fpr(store)
     return RunSummary(
         scenario=scenario.name,

@@ -94,6 +94,24 @@ def test_nominal_runtime():
     assert time.perf_counter() - start < 10
 
 
+def test_last_tick_command_is_recorded():
+    bus = InMemoryBus()
+
+    class Stopper:
+        def on_tick(self, clock: SimClock) -> None:
+            if clock.tick == 3:
+                bus.publish(
+                    topics.command("drill"),
+                    {"command": "stop", "params": {}, "source": "edge", "reason": "末拍"},
+                    "edge-drill",
+                )
+
+    store = TraceStore()
+    run(load_scenario(SCENARIOS / "nominal.yaml"), store, bus=bus, controllers=[Stopper()], n_ticks=3)
+    [action] = store.actions()
+    assert (action.command, action.t, action.accepted, action.reason) == ("stop", 5400.0, True, "末拍")
+
+
 def test_controllers_called_each_tick():
     seen = []
 
