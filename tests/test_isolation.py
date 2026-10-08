@@ -17,7 +17,7 @@ def find_sim_imports(root: Path) -> list[str]:
         if not pkg_dir.is_dir():
             continue
         for path in sorted(pkg_dir.rglob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = ast.parse(path.read_bytes(), filename=str(path))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     modules = [alias.name for alias in node.names]
@@ -54,3 +54,10 @@ def test_checker_detects_violations(tmp_path):
     assert len(violations) == 4
     assert all(v.startswith(str(Path("edge/sub/bad.py"))) for v in violations)
     assert [v.rsplit(": ", 1)[1] for v in violations] == ["sim", "sim.plant", "sim", "sim.models"]
+
+
+def test_checker_handles_bom_files(tmp_path):
+    (tmp_path / "guard").mkdir()
+    (tmp_path / "guard" / "bom.py").write_text("from sim import etch\n", encoding="utf-8-sig")
+
+    assert find_sim_imports(tmp_path) == [f"{Path('guard/bom.py')}:1: sim"]

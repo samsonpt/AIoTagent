@@ -127,6 +127,22 @@ def test_update_fault_only_changes_given_fields(store):
     ]
 
 
+def test_update_fault_does_not_affect_other_faults(store):
+    store.record_fault(make_fault("F001"))
+    store.record_fault(make_fault("F002"))
+    store.update_fault("F001", t_end=150.0, cleared_by="edge")
+    assert store.faults() == [
+        dataclasses.replace(make_fault("F001"), t_end=150.0, cleared_by="edge"),
+        make_fault("F002"),
+    ]
+
+
+def test_update_fault_unknown_id_raises(store):
+    with pytest.raises(KeyError):
+        store.update_fault("F404", t_end=1.0)
+    store.update_fault("F404")
+
+
 def test_panel_roundtrip(store):
     rec = make_panel()
     store.record_panel(rec)
@@ -162,6 +178,18 @@ def test_mark_action_only_changes_given_flags(store):
     (got,) = store.actions()
     assert got.overridden is True
     assert got.rolled_back is True
+
+
+def test_mark_action_unknown_id_raises(store):
+    with pytest.raises(KeyError):
+        store.mark_action(404, overridden=True)
+    store.mark_action(404)
+
+
+def test_record_action_ignores_given_action_id(store):
+    aid = store.record_action(dataclasses.replace(make_action(), action_id=99))
+    assert aid != 99
+    assert [a.action_id for a in store.actions()] == [aid]
 
 
 @pytest.mark.parametrize("kw", [{"source": "robot"}, {"category": "reboot"}])
@@ -230,3 +258,8 @@ def test_file_database_persists_after_reopen(tmp_path):
     with TraceStore(str(path)) as s:
         assert s.dump() == expected
         assert [f.fault_id for f in s.faults()] == ["F001", "F002"]
+
+
+def test_file_database_uses_wal(tmp_path):
+    with TraceStore(tmp_path / "trace.db") as s:
+        assert s._conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"

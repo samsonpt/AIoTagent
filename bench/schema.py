@@ -144,6 +144,8 @@ class TraceStore:
     def __init__(self, path: str | Path = ":memory:"):
         self._conn = sqlite3.connect(str(path))
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -163,9 +165,11 @@ class TraceStore:
             return
         assignments = ", ".join(f"{k} = ?" for k in changes)
         with self._conn:
-            self._conn.execute(
+            cur = self._conn.execute(
                 f"UPDATE {table} SET {assignments} WHERE {key} = ?", [*changes.values(), key_value]
             )
+        if cur.rowcount == 0:
+            raise KeyError(key_value)
 
     def _select(self, table: str, cls) -> list:
         rows = self._conn.execute(f"SELECT * FROM {table} ORDER BY {_ORDER[table]}")
