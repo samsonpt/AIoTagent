@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from bench.metrics import action_accept_rate, root_cause_top1
+from bench.metrics import action_accept_rate, root_cause_top1, root_cause_top3
 from bench.schema import PanelRecord, TraceStore
 from cloud.graph import build_cloud_graph, run_cloud_graph
 from cloud.llm import FakeLLM
@@ -34,6 +35,35 @@ class EvalCase(BaseModel):
     root_cause_process: str
     acceptable_actions: list[str]
     notes: str = ""
+
+
+# 证据充分性、工艺知识一致性、动作理由、风险说明。评分模型与被测 LLM 分离。
+RUBRIC_KEYS = ("evidence", "consistency", "rationale", "risk")
+RUBRIC_CRITERIA = {
+    "evidence": "证据充分性",
+    "consistency": "与工艺知识的一致性",
+    "rationale": "动作理由",
+    "risk": "风险说明",
+}
+
+
+class RubricScores(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    evidence: int = Field(ge=1, le=5)
+    consistency: int = Field(ge=1, le=5)
+    rationale: int = Field(ge=1, le=5)
+    risk: int = Field(ge=1, le=5)
+
+
+class JudgeLLM:
+    """包装另一 ChatLLM / FakeLLM。不得与被测智能体共用同一客户端实例。"""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def complete(self, messages: list[dict], *, response_model: type[BaseModel]) -> BaseModel:
+        return self._client.complete(messages, response_model=response_model)
 
 
 # FakeLLM 脚本按 case.id 注册；score_eval_case 走 run_cloud_graph(case.context)，
@@ -221,6 +251,26 @@ def _make_tools(case: EvalCase) -> CloudTools:
     return tools
 
 
+def _ranked_processes(state: dict) -> list[str]:
+    """主预测在前，其余假设按出现顺序去重。Top-3 只看前三名。"""
+    ranked: list[str] = []
+    detail = state.get("detail") or {}
+    for key in ("hypotheses", "root_causes"):
+        items = detail.get(key) or []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            process = item.get("process") if isinstance(item, dict) else None
+            if process and str(process) not in ranked:
+                ranked.append(str(process))
+    primary = _predicted_process(state)
+    if primary:
+        if primary in ranked:
+            ranked.remove(primary)
+        ranked.insert(0, primary)
+    return ranked
+
+
 def _predicted_process(state: dict) -> str:
     if state.get("accepted_cause"):
         return str(state["accepted_cause"])
@@ -252,6 +302,7 @@ def score_eval_case(case: EvalCase, *, llm: FakeLLM | None = None) -> dict:
     )
     state = run_cloud_graph(graph, dict(case.context))
     predicted = _predicted_process(state)
+    predicted_processes = _ranked_processes(state)
     actions = _actions(state)
     primary = actions[0] if actions else ""
     hit = predicted == case.root_cause_process
@@ -261,6 +312,7 @@ def score_eval_case(case: EvalCase, *, llm: FakeLLM | None = None) -> dict:
         "hit": hit,
         "action_ok": action_ok,
         "predicted_process": predicted,
+        "predicted_processes": predicted_processes,
         "actions": actions,
         "primary_action": primary,
         "route": state.get("route", ""),
@@ -277,6 +329,10 @@ def score_eval_suite(
     cases = cases if cases is not None else load_all_eval_cases(directory)
     results = [score_eval_case(c, llm=fake_llm_for_case(c.id)) for c in cases]
     predicted = [r["predicted_process"] for r in results]
+    predicted_lists = [
+        r.get("predicted_processes") or ([r["predicted_process"]] if r["predicted_process"] else [])
+        for r in results
+    ]
     truth = [c.root_cause_process for c in cases]
     actions = [r["primary_action"] for r in results]
     # 若某案多动作命中，用第一个可接受动作作为主动作以便聚合指标
@@ -289,7 +345,122 @@ def score_eval_suite(
     return {
         "n": len(cases),
         "top1": root_cause_top1(predicted, truth),
+        "top3": root_cause_top3(predicted_lists, truth),
         "action_accept_rate": action_accept_rate(scored_actions, acceptable),
         "results": results,
         "cases": cases,
     }
+
+
+def score_rubric(judge_llm, case: EvalCase, agent_output: dict) -> dict[str, float]:
+    """用独立评分模型给四项 1–5 分。judge_llm 不得是被测智能体的 LLM。"""
+    payload = {
+        "criteria": {key: RUBRIC_CRITERIA[key] for key in RUBRIC_KEYS},
+        "scale": "1-5",
+        "case": {
+            "id": case.id,
+            "scenario": case.scenario,
+            "root_cause_process": case.root_cause_process,
+            "acceptable_actions": list(case.acceptable_actions),
+            "context": case.context,
+            "notes": case.notes,
+        },
+        "agent_output": agent_output,
+    }
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是独立评审，与被测智能体不是同一个模型。"
+                "按 1 到 5 分给出 evidence（证据充分性）、consistency（与工艺知识的一致性）、"
+                "rationale（动作理由）、risk（风险说明）。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+        },
+    ]
+    scores = judge_llm.complete(messages, response_model=RubricScores)
+    return {key: float(getattr(scores, key)) for key in RUBRIC_KEYS}
+
+
+def cohens_quadratic_kappa(
+    y_true: list[int],
+    y_pred: list[int],
+    n_classes: int = 5,
+) -> float:
+    """二次加权 Cohen's κ。w_ij = (i-j)^2 / (n_classes-1)^2。空或不等长为 nan。"""
+    if not y_true or not y_pred or len(y_true) != len(y_pred):
+        return float("nan")
+    labels = range(1, n_classes + 1)
+    if any(int(y) not in labels for y in (*y_true, *y_pred)):
+        return float("nan")
+    width = (n_classes - 1) ** 2
+    counts = [[0.0 for _ in range(n_classes)] for _ in range(n_classes)]
+    for truth, pred in zip(y_true, y_pred):
+        counts[int(truth) - 1][int(pred) - 1] += 1.0
+    row = [sum(counts[i]) for i in range(n_classes)]
+    col = [sum(counts[i][j] for i in range(n_classes)) for j in range(n_classes)]
+    n = float(len(y_true))
+    observed = 0.0
+    expected = 0.0
+    for i in range(n_classes):
+        for j in range(n_classes):
+            weight = (i - j) ** 2 / width
+            observed += weight * counts[i][j]
+            expected += weight * (row[i] * col[j] / n)
+    if expected == 0.0:
+        return 1.0 if observed == 0.0 else float("nan")
+    return float(1.0 - observed / expected)
+
+
+def run_eval_suite(
+    cases: list[EvalCase] | None = None,
+    *,
+    directory: str | Path | None = None,
+    judge_llm=None,
+    human_scores: list[dict] | None = None,
+) -> dict:
+    """汇总 Top-1/Top-3、动作可接受率与四项评审均分。κ 仅在提供 human_scores 时计算。"""
+    summary = score_eval_suite(cases, directory=directory)
+    scored_cases = summary["cases"]
+    results = summary["results"]
+    rubrics: list[dict[str, float]] | None = None
+    if judge_llm is not None:
+        rubrics = [score_rubric(judge_llm, case, result) for case, result in zip(scored_cases, results)]
+    if rubrics:
+        rubric_mean = {key: float(sum(row[key] for row in rubrics) / len(rubrics)) for key in RUBRIC_KEYS}
+    else:
+        rubric_mean = {key: float("nan") for key in RUBRIC_KEYS}
+    out = {**summary, "rubric_mean": rubric_mean}
+    if rubrics is not None:
+        out["rubrics"] = rubrics
+    if human_scores is not None:
+        kappa: dict[str, float] = {}
+        aligned = rubrics is not None and len(human_scores) == len(rubrics)
+        for key in RUBRIC_KEYS:
+            if not aligned:
+                kappa[key] = float("nan")
+                continue
+            y_true = [int(row[key]) for row in human_scores]
+            y_pred = [int(row[key]) for row in rubrics]
+            kappa[key] = cohens_quadratic_kappa(y_true, y_pred)
+        out["kappa"] = kappa
+    return out
+
+
+def _main() -> None:
+    """评测套件入口。默认不算 κ；矩阵不必调用本路径。"""
+    suite = run_eval_suite()
+    payload = {
+        "n": suite["n"],
+        "top1": suite["top1"],
+        "top3": suite["top3"],
+        "action_accept_rate": suite["action_accept_rate"],
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    _main()

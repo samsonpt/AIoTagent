@@ -231,6 +231,14 @@ def root_cause_top1(predicted: list[str], truth: list[str]) -> float:
     return float(hits / len(truth))
 
 
+def root_cause_top3(predicted_lists: list[list[str]], truth: list[str]) -> float:
+    """真实根因落在候选列表前 3 名的比例。空输入或条数不一致时为 nan。"""
+    if not predicted_lists or not truth or len(predicted_lists) != len(truth):
+        return float("nan")
+    hits = sum(1 for preds, label in zip(predicted_lists, truth) if label in list(preds)[:3])
+    return float(hits / len(truth))
+
+
 def action_accept_rate(
     actions: list[str],
     acceptable: list[set[str] | list[str]],
