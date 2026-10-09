@@ -37,22 +37,60 @@ class CloudState(TypedDict):
 
 
 def _lot_params(history: dict, process: str, recipe) -> dict:
-    params = dict(history.get(process) or {})
+    raw = dict(history.get(process) or {})
     if process == "plating":
-        zones = params.get("thickness_zones")
-        if zones:
-            params.setdefault("asd", recipe.window("plating", "current_density_asd").target)
-            params.setdefault("time_min", 60.0)
-            params.setdefault("additive_ml_l", 4.5)
-    elif process == "etch":
-        params.setdefault("conveyor_speed_m_min", recipe.window("etch", "conveyor_speed_m_min").target)
-        params.setdefault("etch_temp_c", recipe.window("etch", "etch_temp_c").target)
-        params.setdefault("sg", recipe.window("etch", "sg").target)
-    elif process == "drill":
-        params.setdefault("bit_hits", 0)
-        params.setdefault("spindle_rpm", recipe.window("drill", "spindle_rpm").target)
-        params.setdefault("feed_rate_m_min", recipe.window("drill", "feed_rate_m_min").target)
-    return params
+        return {
+            "asd": float(
+                raw.get("asd")
+                or raw.get("current_density_asd")
+                or recipe.window("plating", "current_density_asd").target
+            ),
+            "time_min": float(
+                raw.get("time_min") or recipe.constants.get("plating_time_min", 60.0)
+            ),
+            "additive_ml_l": float(
+                raw.get("additive_ml_l")
+                or recipe.window("plating", "additive_ml_l").target
+            ),
+            "lot_id": history.get("lot_id"),
+        }
+    if process == "etch":
+        plating = dict(history.get("plating") or {})
+        zones = plating.get("thickness_zones") or []
+        thickness = float(sum(zones) / len(zones)) if zones else 25.0
+        return {
+            "sg": float(raw.get("sg") or recipe.window("etch", "sg").target),
+            "temp_c": float(
+                raw.get("temp_c")
+                or raw.get("etch_temp_c")
+                or recipe.window("etch", "etch_temp_c").target
+            ),
+            "spray_bar": float(
+                raw.get("spray_bar")
+                or raw.get("spray_pressure_bar")
+                or recipe.window("etch", "spray_pressure_bar").target
+            ),
+            "speed_m_min": float(
+                raw.get("speed_m_min")
+                or raw.get("conveyor_speed_m_min")
+                or recipe.window("etch", "conveyor_speed_m_min").target
+            ),
+            "thickness_um": float(raw.get("thickness_um") or thickness),
+            "lot_id": history.get("lot_id"),
+        }
+    if process == "drill":
+        return {
+            "bit_hits": float(raw.get("bit_hits") or 0),
+            "spindle_rpm": float(
+                raw.get("spindle_rpm") or recipe.window("drill", "spindle_rpm").target
+            ),
+            "feed_rate_m_min": float(
+                raw.get("feed_rate_m_min")
+                or recipe.window("drill", "feed_rate_m_min").target
+            ),
+            "lot_id": history.get("lot_id"),
+        }
+    return raw
 
 
 def _pick_best_candidate(candidates: list[dict], predictions) -> dict:

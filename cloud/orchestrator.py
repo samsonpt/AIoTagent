@@ -208,7 +208,20 @@ class CloudOrchestrator:
                 **event,
                 "episode_id": f"cloud-{process}-{tick}",
             }
-        state = run_cloud_graph(self._graph, event)
+        try:
+            state = run_cloud_graph(self._graph, event)
+        except Exception as exc:
+            state = {
+                "event": event,
+                "route": "end",
+                "hypothesis": None,
+                "accepted_cause": None,
+                "intents": [],
+                "episode_id": event["episode_id"],
+                "handler": "human",
+                "detail": {"error": str(exc)[:500]},
+                "messages": [],
+            }
         self._record_episode(event, state)
 
     def on_tick(self, clock: SimClock) -> None:

@@ -93,3 +93,33 @@ def test_deepseek_llm_complete_without_key_raises():
     llm = DeepSeekLLM(api_key=None)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         llm.complete([], response_model=SupervisorDecision)
+
+
+def test_with_json_instruction_includes_json_word():
+    from cloud.llm import _with_json_instruction
+
+    out = _with_json_instruction(
+        [{"role": "user", "content": "route this event"}],
+        SupervisorDecision,
+    )
+    assert out[0]["role"] == "system"
+    assert "json" in out[0]["content"].lower()
+    assert "SupervisorDecision" in out[0]["content"]
+    assert len(out) == 2
+
+
+def test_deepseek_complete_sends_json_in_prompt(monkeypatch):
+    from unittest.mock import MagicMock
+
+    llm = DeepSeekLLM(api_key="sk-test")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content='{"route":"end","reason":"ok"}'))]
+    )
+    llm._client = mock_client
+    out = llm.complete([{"role": "user", "content": "x"}], response_model=SupervisorDecision)
+    assert out.route == "end"
+    kwargs = mock_client.chat.completions.create.call_args.kwargs
+    blob = " ".join(m["content"] for m in kwargs["messages"]).lower()
+    assert "json" in blob
+    assert kwargs["response_format"] == {"type": "json_object"}

@@ -71,7 +71,7 @@ class DeepSeekLLM:
         try:
             response = self._client.chat.completions.create(
                 model=self._model,
-                messages=messages,
+                messages=_with_json_instruction(messages, response_model),
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content
@@ -88,3 +88,15 @@ class DeepSeekLLM:
             if self._api_key:
                 detail = detail.replace(self._api_key, "***")
             raise ValueError(f"DeepSeek API call failed: {detail}") from exc
+
+
+def _with_json_instruction(messages: list[dict], response_model: type[BaseModel]) -> list[dict]:
+    schema = json.dumps(response_model.model_json_schema(), sort_keys=True, ensure_ascii=False)
+    instruction = {
+        "role": "system",
+        "content": (
+            f"Respond with a single JSON object matching this schema for {response_model.__name__}: "
+            f"{schema}"
+        ),
+    }
+    return [instruction, *messages]
