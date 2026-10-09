@@ -243,3 +243,155 @@ def llm_usage(details: Iterable[dict]) -> dict[str, float]:
         else:
             tokens += float(token_val or 0)
     return {"llm_calls": calls, "llm_tokens": tokens}
+
+
+def _as_float(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(out):
+        return None
+    return out
+
+
+def _latest_telemetry(store: TraceStore, process: str, equipment: str, key: str, t_max: float) -> float | None:
+    best_t: float | None = None
+    best: float | None = None
+    for t, _proc, equip, _key, value in store.telemetry(process=process, key=key):
+        if equip != equipment or t > t_max:
+            continue
+        number = _as_float(value)
+        if number is None:
+            continue
+        if best_t is None or t >= best_t:
+            best_t = t
+            best = number
+    return best
+
+
+def _bit_used_rated(action, store: TraceStore) -> tuple[float | None, float | None]:
+    params = action.params or {}
+    used = _as_float(params.get("bit_hits"))
+    rated = _as_float(params.get("bit_rated_life_hits"))
+    if rated is None:
+        rated = _as_float(params.get("rated_life"))
+    if used is None:
+        used = _latest_telemetry(store, action.process, action.equipment, "bit_hits", action.t)
+    if rated is None:
+        rated = _latest_telemetry(store, action.process, action.equipment, "bit_rated_life_hits", action.t)
+    if rated is None:
+        rated = _latest_telemetry(store, action.process, action.equipment, "rated_life", action.t)
+    return used, rated
+
+
+def bit_life_utilization(store: TraceStore) -> float:
+    ratios: list[float] = []
+    for action in store.actions():
+        if not action.accepted or action.category != "bit_change":
+            continue
+        used, rated = _bit_used_rated(action, store)
+        if used is None or rated is None or rated <= 0:
+            continue
+        ratios.append(used / rated)
+    if not ratios:
+        return float("nan")
+    return float(sum(ratios) / len(ratios))
+
+
+def drill_break_count(store: TraceStore) -> float:
+    return float(sum(1 for fault in store.faults() if fault.fault_type == "drill_break"))
+
+
+def unplanned_downtime_s(store: TraceStore) -> float:
+    total = 0.0
+    for action in store.actions():
+        if not action.accepted or action.category != "line_stop":
+            continue
+        raw = (action.params or {}).get("duration_s", 1800)
+        duration = 1800.0 if raw is None else _as_float(raw)
+        if duration is None:
+            duration = 1800.0
+        total += duration
+    return total
+
+
+def dosing_consumption(store: TraceStore) -> float:
+    total = 0.0
+    for action in store.actions():
+        if not action.accepted or action.category != "dosing":
+            continue
+        amount = _as_float((action.params or {}).get("amount"))
+        if amount is not None:
+            total += amount
+    return total
+
+
+def envelope_violations(store: TraceStore) -> float:
+    return float(sum(1 for episode in store.episodes() if episode.violated))
+
+
+def _fault_active_until(fault) -> float:
+    stops = [stamp for stamp in (fault.t_end, fault.t_cleared) if stamp is not None]
+    return min(stops) if stops else math.inf
+
+
+def _preventive_action(action) -> bool:
+    reason = action.reason or ""
+    return "预防" in reason or "preventive" in reason.lower()
+
+
+def false_action_count(store: TraceStore) -> float:
+    faults = store.faults()
+    count = 0
+    for action in store.actions():
+        if not action.accepted or _preventive_action(action):
+            continue
+        active = any(
+            fault.process == action.process
+            and fault.fault_type in PHYSICAL_FAULT_TYPES
+            and fault.t_start <= action.t < _fault_active_until(fault)
+            for fault in faults
+        )
+        if not active:
+            count += 1
+    return float(count)
+
+
+def decision_latency(store: TraceStore) -> dict[str, float]:
+    delays = [ep.t_decide - ep.t_detect for ep in store.episodes() if ep.t_decide is not None]
+    if not delays:
+        return {"p50": float("nan"), "p95": float("nan")}
+    arr = np.asarray(delays, dtype=float)
+    return {"p50": float(np.percentile(arr, 50)), "p95": float(np.percentile(arr, 95))}
+
+
+def _panel_fpy(panels) -> float:
+    if not panels:
+        return float("nan")
+    return sum(1 for panel in panels if not panel.defects) / len(panels)
+
+
+def _in_outage(t_aoi: float, faults) -> bool:
+    for fault in faults:
+        if fault.fault_type != "network_outage":
+            continue
+        hi = math.inf if fault.t_end is None else fault.t_end + PIPELINE_LATENCY_S
+        if fault.t_start <= t_aoi <= hi:
+            return True
+    return False
+
+
+def outage_fpy_retention(store: TraceStore) -> float:
+    outages = [fault for fault in store.faults() if fault.fault_type == "network_outage"]
+    if not outages:
+        return float("nan")
+    inside = [panel for panel in store.panels() if _in_outage(panel.t_aoi, outages)]
+    outside = [panel for panel in store.panels() if not _in_outage(panel.t_aoi, outages)]
+    numerator = _panel_fpy(inside)
+    denominator = _panel_fpy(outside)
+    if math.isnan(numerator) or math.isnan(denominator) or denominator == 0:
+        return float("nan")
+    return float(numerator / denominator)
