@@ -1,0 +1,15 @@
+id: ad-02
+scenario: additive_depletion
+seed: 45
+tick_window: [8, 32]
+context:
+  type: event
+  process: plating
+  kind: additive_depletion
+  lot_id: L0004
+  episode_id: eval-ad-02
+root_cause_process: plating
+acceptable_actions:
+  - dose_additive
+notes: >-
+  FakeLLM 走 maint→dose_additive；图路径评分。

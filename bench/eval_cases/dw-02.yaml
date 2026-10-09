@@ -1,0 +1,17 @@
+id: dw-02
+scenario: drill_wear
+seed: 49
+tick_window: [12, 44]
+context:
+  type: aoi_threshold
+  lot_id: L0008
+  process: drill
+  defect_rate: 0.2
+  episode_id: eval-dw-02
+  rag_query: drill_abnormal_wear 孔壁粗糙
+root_cause_process: drill
+acceptable_actions:
+  - set_feed
+  - change_bit
+notes: >-
+  FakeLLM 走 quality_rca→tuner（drill/roughness）；仅图路径。

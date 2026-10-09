@@ -1,4 +1,5 @@
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import numpy as np
@@ -78,3 +79,37 @@ def fpr(store: TraceStore) -> FprResult:
         cross_process_ratio=_ratio(sum(1 for stage, cause in caused if stage != cause), len(caused)),
         n_faults=len(faults),
     )
+
+
+def root_cause_top1(predicted: list[str], truth: list[str]) -> float:
+    if not truth:
+        return float("nan")
+    if len(predicted) == len(truth):
+        return float(sum(p == t for p, t in zip(predicted, truth)) / len(truth))
+    top = predicted[:1]
+    return float(sum(1 for t in truth if t in top) / len(truth))
+
+
+def action_accept_rate(
+    actions: list[str],
+    acceptable: list[set[str] | list[str]],
+) -> float:
+    if not actions or not acceptable:
+        return float("nan")
+    if len(actions) != len(acceptable):
+        return float("nan")
+    hits = sum(1 for action, ok in zip(actions, acceptable) if action in set(ok))
+    return float(hits / len(actions))
+
+
+def llm_usage(details: Iterable[dict]) -> dict[str, float]:
+    calls = 0.0
+    tokens = 0.0
+    for detail in details:
+        calls += float(detail.get("llm_calls", 0) or 0)
+        token_val = detail.get("llm_tokens", detail.get("tokens", detail.get("token_usage", 0)))
+        if isinstance(token_val, dict):
+            tokens += float(token_val.get("total", 0) or 0)
+        else:
+            tokens += float(token_val or 0)
+    return {"llm_calls": calls, "llm_tokens": tokens}

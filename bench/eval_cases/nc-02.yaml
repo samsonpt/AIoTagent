@@ -1,0 +1,15 @@
+id: nc-02
+scenario: nozzle_clog
+seed: 43
+tick_window: [12, 36]
+context:
+  type: event
+  process: etch
+  kind: nozzle_clog
+  lot_id: L0002
+  episode_id: eval-nc-02
+root_cause_process: etch
+acceptable_actions:
+  - clean_nozzle
+notes: >-
+  FakeLLM 走 maint→clean_nozzle；图路径评分，无 Plant 短跑。

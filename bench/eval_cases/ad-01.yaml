@@ -1,0 +1,17 @@
+id: ad-01
+scenario: additive_depletion
+seed: 44
+tick_window: [10, 40]
+context:
+  type: aoi_threshold
+  lot_id: L0003
+  process: plating
+  defect_rate: 0.22
+  episode_id: eval-ad-01
+  rag_query: additive_depletion 薄铜
+root_cause_process: plating
+acceptable_actions:
+  - set_current_density
+  - dose_additive
+notes: >-
+  FakeLLM 走 quality_rca→tuner（plating/thickness）；仅图路径。

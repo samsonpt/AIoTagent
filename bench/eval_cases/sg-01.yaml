@@ -1,0 +1,16 @@
+id: sg-01
+scenario: sg_drift
+seed: 46
+tick_window: [10, 40]
+context:
+  type: event
+  process: etch
+  kind: etch_sg_drift
+  lot_id: L0005
+  episode_id: eval-sg-01
+root_cause_process: etch
+acceptable_actions:
+  - adjust_sg
+  - repair_regenerator
+notes: >-
+  FakeLLM 走 maint→adjust_sg；图路径评分，无 Plant。

@@ -1,0 +1,17 @@
+id: sg-02
+scenario: sg_drift
+seed: 47
+tick_window: [14, 48]
+context:
+  type: aoi_threshold
+  lot_id: L0006
+  process: etch
+  defect_rate: 0.3
+  episode_id: eval-sg-02
+  rag_query: etch_sg_drift 线宽偏窄
+root_cause_process: etch
+acceptable_actions:
+  - set_conveyor_speed
+  - adjust_sg
+notes: >-
+  FakeLLM 走 quality_rca→tuner；仅 run_cloud_graph。

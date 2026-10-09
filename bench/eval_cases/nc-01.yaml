@@ -1,0 +1,18 @@
+id: nc-01
+scenario: nozzle_clog
+seed: 42
+tick_window: [10, 40]
+context:
+  type: aoi_threshold
+  lot_id: L0001
+  process: etch
+  defect_rate: 0.28
+  episode_id: eval-nc-01
+  rag_query: nozzle_clog 线宽 过蚀
+root_cause_process: etch
+acceptable_actions:
+  - set_conveyor_speed
+  - clean_nozzle
+notes: >-
+  FakeLLM 走 quality_rca→tuner；score_eval_case 仅 run_cloud_graph(case.context)，
+  不跑完整 Plant。

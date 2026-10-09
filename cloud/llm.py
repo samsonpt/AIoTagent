@@ -15,6 +15,7 @@ class LlmClient(Protocol):
 class FakeLLM:
     def __init__(self, scripts: dict[str, list[dict] | dict]) -> None:
         self._scripts: dict[str, list[dict]] = {}
+        self.call_count = 0
         for key, value in scripts.items():
             if isinstance(value, list):
                 self._scripts[key] = list(value)
@@ -26,6 +27,7 @@ class FakeLLM:
         if name not in self._scripts or not self._scripts[name]:
             raise KeyError(name)
         data = self._scripts[name].pop(0)
+        self.call_count += 1
         return response_model.model_validate(data)
 
 

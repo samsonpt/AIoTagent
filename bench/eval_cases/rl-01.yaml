@@ -1,0 +1,15 @@
+id: rl-01
+scenario: rectifier_low
+seed: 50
+tick_window: [10, 40]
+context:
+  type: event
+  process: plating
+  kind: rectifier_low
+  lot_id: L0009
+  episode_id: eval-rl-01
+root_cause_process: plating
+acceptable_actions:
+  - repair_rectifier
+notes: >-
+  FakeLLM 走 maint→repair_rectifier；图路径评分，无完整 Plant。

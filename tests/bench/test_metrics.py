@@ -7,10 +7,13 @@ from bench.metrics import (
     PHYSICAL_FAULT_TYPES,
     PIPELINE_LATENCY_S,
     FprResult,
+    action_accept_rate,
     coverage90,
     fpr,
     fpy,
+    llm_usage,
     mape,
+    root_cause_top1,
     scrap_rate,
 )
 from bench.schema import FaultRecord, PanelRecord, TraceStore
@@ -165,3 +168,33 @@ def test_coverage90_partial_hits():
     q05 = np.array([-1.0, 6.0, 9.0])
     q95 = np.array([1.0, 7.0, 11.0])
     assert coverage90(y, q05, q95) == pytest.approx(2 / 3)
+
+
+def test_root_cause_top1_perfect_and_partial():
+    assert root_cause_top1(["etch", "plating"], ["etch", "plating"]) == 1.0
+    assert root_cause_top1(["etch", "drill"], ["etch", "plating"]) == pytest.approx(0.5)
+    assert math.isnan(root_cause_top1([], []))
+    assert math.isnan(root_cause_top1(["etch"], ["etch", "plating"]))
+
+
+def test_action_accept_rate():
+    assert action_accept_rate(
+        ["clean_nozzle", "dose_additive"],
+        [{"clean_nozzle", "set_conveyor_speed"}, ["dose_additive"]],
+    ) == 1.0
+    assert action_accept_rate(
+        ["stop", "dose_additive"],
+        [["clean_nozzle"], ["dose_additive"]],
+    ) == pytest.approx(0.5)
+    assert math.isnan(action_accept_rate([], []))
+
+
+def test_llm_usage_sums_detail_fields():
+    usage = llm_usage(
+        [
+            {"llm_calls": 2, "llm_tokens": 100},
+            {"llm_calls": 1, "tokens": 40},
+            {},
+        ]
+    )
+    assert usage == {"llm_calls": 3.0, "llm_tokens": 140.0}

@@ -60,7 +60,7 @@
 | 药水消耗 | 补药动作的累计投加量 | `Σ params.amount`（`category = dosing`） | `action_log.params / category` | — | M7（草案，M7 复核） |
 | 工艺窗口越界次数 | 处置过程中越过工艺窗口的次数 | `#{e : e.violated}` | `episode_log.violated` | — | M7（草案，M7 复核） |
 | 误动作数 | 无真值故障时触发的纠正动作数；预防性动作（按寿命换针、按计划补药等，`reason` 标注为预防性）不计入 | `#{a : a.accepted、非预防性、且该工序在 a.t 时无活动物理故障}` | `action_log`、`fault_truth` | — | M7（草案，M7 复核） |
-| LLM 调用次数 / token / 成本 | 云端智能体的 LLM 使用量 | 计数与求和 | `episode_log.detail` | — | M4（草案，M7 复核） |
+| LLM 调用次数 / token / 成本 | 云端智能体的 LLM 使用量 | 计数与求和 | `episode_log.detail` | — | 已实现（M4），`llm_usage` |
 | 决策延迟 P50/P95 | 检测到决策的时间分位数 | `quantile(t_decide − t_detect, {0.5, 0.95})` | `episode_log.t_detect / t_decide` | — | M7（草案，M7 复核） |
 | 断网良率保持率 | 断网时段 FPY 与正常时段 FPY 之比 | `FPY(断网窗口内 t_aoi) ÷ FPY(其余时段)`；断网窗口取 `network_outage` 的 `[t_start, t_end + PIPELINE_LATENCY_S]` | `fault_truth`、`panel_lineage` | — | M7（草案，M7 复核） |
 
@@ -71,15 +71,15 @@
 | 铜厚与线宽 MAPE | 孪生预测相对实测的平均绝对百分比误差 | `mean |ŷ − y| ÷ |y| × 100%`，铜厚与线宽分别报告 | `panel_lineage.plating / etch`（实测）、孪生预测日志 | — | 已实现（M3），`mape` |
 | 90% 预测区间覆盖率 | 实测落在孪生 90% 预测区间内的比例 | `#{y ∈ [q05, q95]} ÷ #y` | 同上 | — | 已实现（M3），`coverage90` |
 | 漂移后重新校准时间 | 发生漂移后孪生 MAPE 回到漂移前水平所需时间 | `t(MAPE 回到基线 1.2 倍以内) − t_start` | `fault_truth`、孪生预测日志 | — | M3（草案，M7 复核） |
-| 根因准确率 | 智能体判定的根因工序与真值一致的比例 | `#{判定 = root_cause_truth} ÷ #判定` | `episode_log.detail`、`panel_lineage.root_cause_truth` | — | M4（草案，M7 复核） |
+| 根因准确率 | 智能体判定的根因工序与真值一致的比例 | `#{判定 = root_cause_truth} ÷ #判定` | `episode_log.detail`、`panel_lineage.root_cause_truth`；评测集见 `root_cause_top1` | — | 已实现（M4），`root_cause_top1` |
 | Guard 误放行率 / 误拒绝率 | Guard 放行了不应执行的动作 / 拒绝了应执行的动作的比例 | 误放行 ÷ 应拒绝动作数；误拒绝 ÷ 应放行动作数 | `action_log.accepted / reason`、`fault_truth` | — | M5（草案，M7 复核） |
 
 ### 1.6 智能体推理质量
 
 | 指标 | 定义 | 公式 | 数据来源 | 表 IV 维度 | 实现里程碑 |
 |------|------|------|----------|------------|------------|
-| 根因 Top-1 / Top-3 命中率 | 真实根因工序位于智能体候选列表前 1 / 前 3 的比例 | `#{root ∈ top_k} ÷ #cases` | `bench/eval_cases/`、智能体输出 | — | M4（草案，M7 复核） |
-| 动作可接受率 | 智能体动作落在可接受动作集合内的比例 | `#{action ∈ acceptable} ÷ #cases` | 同上 | — | M4（草案，M7 复核） |
+| 根因 Top-1 / Top-3 命中率 | 真实根因工序位于智能体候选列表前 1 / 前 3 的比例 | `#{root ∈ top_k} ÷ #cases` | `bench/eval_cases/`、智能体输出 | — | 已实现（M4），`root_cause_top1`（Top-3 待 M7） |
+| 动作可接受率 | 智能体动作落在可接受动作集合内的比例 | `#{action ∈ acceptable} ÷ #cases` | 同上 | — | 已实现（M4），`action_accept_rate` |
 | LLM 评审分（1~5） | 评分模型按标准给出的证据充分性、工艺知识一致性、动作理由、风险说明四项分数，评分模型与被测模型不同 | 各项均值 | 同上 | — | M4（草案，M7 复核） |
 | Cohen's kappa | LLM 评审与人工评分的一致性 | 二次加权 kappa：`κ_w = 1 − Σ w_ij O_ij ÷ Σ w_ij E_ij`，`w_ij = (i − j)² ÷ (5 − 1)²`，`O` 为观测频数，`E` 为按边际分布的期望频数；四项评分标准分别报告 | 同上 + 人工评分 | — | M4（草案，M7 复核） |
 

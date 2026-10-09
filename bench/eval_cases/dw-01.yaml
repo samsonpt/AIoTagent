@@ -1,0 +1,15 @@
+id: dw-01
+scenario: drill_wear
+seed: 48
+tick_window: [10, 40]
+context:
+  type: event
+  process: drill
+  kind: drill_abnormal_wear
+  lot_id: L0007
+  episode_id: eval-dw-01
+root_cause_process: drill
+acceptable_actions:
+  - change_bit
+notes: >-
+  FakeLLM 走 maint→change_bit；图路径评分。
