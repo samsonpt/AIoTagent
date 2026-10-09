@@ -11,9 +11,11 @@ from bench.metrics import (
     envelope_violations,
     false_action_count,
     fpr,
+    guard_error_rates,
     mttd,
     mttc,
     outage_fpy_retention,
+    twin_recalibration_time,
     unplanned_downtime_s,
 )
 from bench.schema import ActionRecord, EpisodeRecord, FaultRecord, PanelRecord, TraceStore
@@ -278,3 +280,81 @@ def test_outage_fpy_retention_nan_without_outage_or_rest(store: TraceStore):
         "f1", "etch", "e", "nozzle_clog", {}, t_start=1000.0, t_end=2000.0,
     ))
     assert math.isnan(outage_fpy_retention(store))
+
+
+def test_twin_recalibration_time_nan_without_series(store: TraceStore):
+    store.record_fault(FaultRecord(
+        "d1", "etch", "e", "sensor_drift", {}, t_start=1000.0,
+    ))
+    assert math.isnan(twin_recalibration_time(store, None))
+    assert math.isnan(twin_recalibration_time(store, []))
+
+
+def test_twin_recalibration_time_back_within_1_2_baseline(store: TraceStore):
+    # 漂移前 MAPE 均值 2.0，阈值 2.4；1100 仍高，1500 回到阈值内。
+    store.record_fault(FaultRecord(
+        "d1", "etch", "e", "sensor_drift", {}, t_start=1000.0,
+    ))
+    # 物理故障不是漂移：若把它也当校准起点，t_start=200 会在 500 处“恢复”，均值变成 400。
+    store.record_fault(FaultRecord(
+        "p1", "etch", "e", "nozzle_clog", {}, t_start=200.0,
+    ))
+    series = [(100.0, 2.0), (500.0, 2.0), (1100.0, 8.0), (1500.0, 2.2)]
+    assert twin_recalibration_time(store, series) == pytest.approx(500.0)
+
+
+def test_twin_recalibration_time_nan_if_never_returns_or_no_drift(store: TraceStore):
+    series = [(100.0, 2.0), (1500.0, 9.0)]
+    assert math.isnan(twin_recalibration_time(store, series))
+    store.record_fault(FaultRecord(
+        "d1", "etch", "e", "sensor_drift", {}, t_start=1000.0,
+    ))
+    assert math.isnan(twin_recalibration_time(store, series))
+
+
+def test_twin_recalibration_time_means_recovered_drifts(store: TraceStore):
+    store.record_fault(FaultRecord("d1", "etch", "e", "sensor_drift", {}, t_start=100.0))
+    store.record_fault(FaultRecord("d2", "plating", "p", "sensor_drift", {}, t_start=1000.0))
+    series = [
+        (0.0, 10.0),
+        (50.0, 10.0),
+        (160.0, 11.0),
+        (500.0, 10.0),
+        (1100.0, 20.0),
+        (1300.0, 11.0),
+    ]
+    # d1: 基线 10，阈值 12，160-100=60；d2: 基线 10.25，阈值 12.3，1300-1000=300
+    assert twin_recalibration_time(store, series) == pytest.approx((60.0 + 300.0) / 2)
+
+
+def test_guard_false_accept_rate_high_risk_without_fault(store: TraceStore):
+    store.record_action(_action(10.0, "etch", "lot_hold"))
+    store.record_action(_action(20.0, "etch", "scrap", accepted=False, reason="guard blocked"))
+    store.record_action(_action(30.0, "etch", "line_stop"))
+    store.record_action(_action(40.0, "etch", "param_tune"))
+    out = guard_error_rates(store)
+    assert out["false_accept_rate"] == pytest.approx(2.0 / 3.0)
+    assert math.isnan(out["false_reject_rate"])
+
+
+def test_guard_false_reject_during_active_physical_fault(store: TraceStore):
+    store.record_fault(FaultRecord(
+        "f1", "etch", "e", "nozzle_clog", {}, t_start=0.0, t_end=5000.0,
+    ))
+    store.record_fault(FaultRecord(
+        "fs", "plating", "p", "sensor_drift", {}, t_start=0.0, t_end=5000.0,
+    ))
+    store.record_action(_action(1000.0, "etch", "param_tune", accepted=False, reason="Guard rejected"))
+    store.record_action(_action(1100.0, "etch", "dosing"))
+    store.record_action(_action(1200.0, "etch", "bit_change", accepted=False, reason="human hold"))
+    store.record_action(_action(1300.0, "plating", "lot_hold"))
+    store.record_action(_action(5000.0, "etch", "line_stop", reason="停线"))
+    out = guard_error_rates(store)
+    assert out["false_reject_rate"] == pytest.approx(1.0 / 3.0)
+    assert out["false_accept_rate"] == pytest.approx(1.0)
+
+
+def test_guard_error_rates_empty_store_is_nan(store: TraceStore):
+    out = guard_error_rates(store)
+    assert math.isnan(out["false_accept_rate"])
+    assert math.isnan(out["false_reject_rate"])

@@ -395,3 +395,67 @@ def outage_fpy_retention(store: TraceStore) -> float:
     if math.isnan(numerator) or math.isnan(denominator) or denominator == 0:
         return float("nan")
     return float(numerator / denominator)
+
+
+HIGH_RISK_CATEGORIES = frozenset({"lot_hold", "scrap", "line_stop"})
+
+
+def _physical_fault_active(store: TraceStore, process: str, t: float) -> bool:
+    return any(
+        fault.process == process
+        and fault.fault_type in PHYSICAL_FAULT_TYPES
+        and fault.t_start <= t < _fault_active_until(fault)
+        for fault in store.faults()
+    )
+
+
+def twin_recalibration_time(
+    store: TraceStore,
+    mape_series: list[tuple[float, float]] | None,
+) -> float:
+    """漂移后 MAPE 回到漂移前均值 1.2 倍以内的时间。无序列、无 sensor_drift 或未恢复为 nan。"""
+    if not mape_series:
+        return float("nan")
+    series = sorted((float(t), float(value)) for t, value in mape_series)
+    delays: list[float] = []
+    for fault in store.faults():
+        if fault.fault_type != "sensor_drift":
+            continue
+        baseline_vals = [value for t, value in series if t < fault.t_start]
+        if not baseline_vals:
+            continue
+        limit = 1.2 * (sum(baseline_vals) / len(baseline_vals))
+        recovered = next((t for t, value in series if t >= fault.t_start and value <= limit), None)
+        if recovered is None:
+            continue
+        delays.append(recovered - fault.t_start)
+    if not delays:
+        return float("nan")
+    return float(sum(delays) / len(delays))
+
+
+def _guard_rejection(action) -> bool:
+    reason = (action.reason or "").lower()
+    return "guard" in reason or "reject" in reason
+
+
+def guard_error_rates(store: TraceStore) -> dict[str, float]:
+    """误放行 = 无活动物理故障的高风险动作被接受 / 应拒绝数；误拒绝 = 活动故障期间 Guard 拒绝 / 应放行数。"""
+    should_reject = 0
+    false_accept = 0
+    should_accept = 0
+    false_reject = 0
+    for action in store.actions():
+        active = _physical_fault_active(store, action.process, action.t)
+        if action.category in HIGH_RISK_CATEGORIES and not active:
+            should_reject += 1
+            if action.accepted:
+                false_accept += 1
+        if active:
+            should_accept += 1
+            if not action.accepted and _guard_rejection(action):
+                false_reject += 1
+    return {
+        "false_accept_rate": _ratio(false_accept, should_reject),
+        "false_reject_rate": _ratio(false_reject, should_accept),
+    }
