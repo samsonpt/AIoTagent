@@ -82,21 +82,17 @@ def fpr(store: TraceStore) -> FprResult:
 
 
 def root_cause_top1(predicted: list[str], truth: list[str]) -> float:
-    if not truth:
+    if not predicted or not truth or len(predicted) != len(truth):
         return float("nan")
-    if len(predicted) == len(truth):
-        return float(sum(p == t for p, t in zip(predicted, truth)) / len(truth))
-    top = predicted[:1]
-    return float(sum(1 for t in truth if t in top) / len(truth))
+    hits = sum(1 for p, t in zip(predicted, truth) if p == t)
+    return float(hits / len(truth))
 
 
 def action_accept_rate(
     actions: list[str],
     acceptable: list[set[str] | list[str]],
 ) -> float:
-    if not actions or not acceptable:
-        return float("nan")
-    if len(actions) != len(acceptable):
+    if not actions or not acceptable or len(actions) != len(acceptable):
         return float("nan")
     hits = sum(1 for action, ok in zip(actions, acceptable) if action in set(ok))
     return float(hits / len(actions))
