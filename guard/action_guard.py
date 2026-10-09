@@ -128,26 +128,35 @@ class ActionGuard:
 
         needs_approval = False
 
-        # Gate 2 — twin lookahead
-        if self._ablation.use_twin_lookahead and self._twin is not None:
-            mapped = map_command_to_twin(self._recipe, process, command, params)
-            if mapped is None:
-                logger.warning("twin map skip command=%s process=%s", command, process)
-            else:
-                kind, sim_params = mapped
-                if self._ablation.use_twin_confidence_gate:
-                    confidence = confidence_from_twin(self._twin)
-                    if confidence < 0.5:
-                        needs_approval = True
-                    else:
-                        pred = self._twin.simulate(sim_params, kind=kind)
-                        if not passes_twin_gate(pred, confidence):
-                            needs_approval = True
+        # Gate 2 — twin lookahead (§4.3: no twin / disabled → no auto-stamp)
+        if not self._ablation.use_twin_lookahead or self._twin is None:
+            twin_reason = (
+                "twin_disabled" if not self._ablation.use_twin_lookahead else "no_twin"
+            )
+            if self._ablation.use_human_gate:
+                self._enqueue(topic, process, equipment, command, params, source, lot_id)
+                return
+            self._reject(process, equipment, command, params, source, twin_reason, lot_id)
+            return
+
+        mapped = map_command_to_twin(self._recipe, process, command, params)
+        if mapped is None:
+            logger.warning("twin map skip command=%s process=%s", command, process)
+        else:
+            kind, sim_params = mapped
+            if self._ablation.use_twin_confidence_gate:
+                confidence = confidence_from_twin(self._twin)
+                if confidence < 0.5:
+                    needs_approval = True
                 else:
-                    confidence = 1.0
                     pred = self._twin.simulate(sim_params, kind=kind)
                     if not passes_twin_gate(pred, confidence):
                         needs_approval = True
+            else:
+                confidence = 1.0
+                pred = self._twin.simulate(sim_params, kind=kind)
+                if not passes_twin_gate(pred, confidence):
+                    needs_approval = True
 
         # Gate 3 — human / high-risk
         if needs_approval or is_high_risk(self._recipe, process, command, params):

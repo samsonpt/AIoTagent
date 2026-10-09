@@ -75,3 +75,70 @@ def test_hold_lot_enqueued_when_human_gate():
     assert pending[0]["command"] == "hold_lot"
     assert not any(a.command == "hold_lot" and a.accepted for a in store.actions())
     assert plant.stations["drill"].stopped is False
+
+
+def test_no_twin_param_tune_enqueues_with_human_gate():
+    ablation = AblationConfig(use_human_gate=True)
+    plant, bus, store, _, _ = make_guarded(ablation=ablation, twin=None)
+    publish(bus, "plating", "set_current_density", {"asd": 2.0})
+    steps(plant)
+    pending = store.list_approvals("pending")
+    assert len(pending) == 1
+    assert pending[0]["command"] == "set_current_density"
+    assert not any(
+        a.command == "set_current_density" and a.accepted for a in store.actions()
+    )
+
+
+def test_auto_disabled_rejects_non_fast_stop_still_stamps():
+    plant, bus, store, _, guard = make_guarded()
+    guard.auto_actions_enabled = False
+    publish(bus, "plating", "set_current_density", {"asd": 2.0})
+    steps(plant)
+    rejected = [a for a in store.actions() if a.command == "set_current_density"]
+    assert rejected
+    assert all(a.accepted is False for a in rejected)
+    assert "chain_invalid_auto_disabled" in rejected[0].reason
+
+    publish(bus, "drill", "stop")
+    steps(plant)
+    assert any(a.command == "stop" and a.accepted for a in store.actions())
+    assert plant.stations["drill"].stopped
+
+
+def test_resolve_approval_approved_and_rejected():
+    ablation = AblationConfig(use_human_gate=True)
+    plant, bus, store, _, guard = make_guarded(ablation=ablation, twin=None)
+    stamped = []
+
+    def spy(_topic, payload):
+        if payload.get("guarded") is True:
+            stamped.append(payload)
+
+    bus.subscribe("plant/+/+/command", spy, "spy_cmd")
+    bus.subscribe(topics.line_command(), spy, "spy_line")
+
+    publish(bus, "plating", "set_current_density", {"asd": 2.2})
+    steps(plant)
+    req_ok = store.list_approvals("pending")[0]["request_id"]
+    guard.resolve_approval(req_ok, True, "human_ok")
+    assert stamped
+    assert stamped[-1]["guard_id"] == "guard"
+    assert stamped[-1]["command"] == "set_current_density"
+    assert any(
+        a.command == "set_current_density" and a.accepted for a in store.actions()
+    )
+
+    publish(bus, "line", "hold_lot", {"lot_id": "L2"})
+    steps(plant)
+    req_no = [r for r in store.list_approvals("pending") if r["command"] == "hold_lot"][
+        0
+    ]["request_id"]
+    guard.resolve_approval(req_no, False, "human_deny")
+    denied = [
+        a
+        for a in store.actions()
+        if a.command == "hold_lot" and a.accepted is False
+    ]
+    assert denied
+    assert "human_deny" in denied[-1].reason
