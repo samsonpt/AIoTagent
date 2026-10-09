@@ -75,4 +75,7 @@ class DeepSeekLLM:
         except ValueError:
             raise
         except Exception as exc:
-            raise ValueError(f"DeepSeek API call failed: {exc}") from exc
+            detail = str(exc)
+            if self._api_key:
+                detail = detail.replace(self._api_key, "***")
+            raise ValueError(f"DeepSeek API call failed: {detail}") from exc
