@@ -1,3 +1,5 @@
+"""Action guard: policy, chain, and runtime gateway."""
+
 from guard.policy import (
     FAST_PATH,
     HIGH_RISK_COMMANDS,
