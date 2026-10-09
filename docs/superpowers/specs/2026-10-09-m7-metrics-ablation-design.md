@@ -177,3 +177,14 @@ python scripts/run_matrix.py --llm fake --scenarios additive_depletion \
 ## 9. 偏差记录
 
 （实现期若修订 metrics_spec 公式或数据源，在此追加条目。）
+
+### 9.1 auto_approve 与 HumanModel（2026-10-09）
+
+§2 决策表与 §3 数据流原写「`auto_approve=False` + HumanModel」，与 `bench/human_model.py` 实现矛盾：`HumanModel._process_approvals` 在 `auto_approve=False` 时直接 `return`，不会执行延迟审批逻辑。
+
+**修正：**
+
+- **矩阵运行**（`matrix_runner` / `run_matrix.py`）：`auto_approve=True`，使 HumanModel 按 §7.5 参数执行审批。
+- **演示看板**（`demo_live.py` / Streamlit）：仍用 `auto_approve=False`，由 UI 人工审批，不自动消费 pending。
+
+§2 决策表「审批」行与 §3 数据流中的 `auto_approve=False` 以上述为准，矩阵侧以 `True` 为正式行为。
