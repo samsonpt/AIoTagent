@@ -2,6 +2,7 @@ import dataclasses
 import hashlib
 import json
 import sqlite3
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -166,7 +167,6 @@ class TraceStore:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
-        self._approval_seq = 0
 
     def _insert(self, table: str, rec, *, replace: bool = False, exclude: tuple[str, ...] = ()) -> int:
         names, values = _encode(rec, exclude)
@@ -257,8 +257,7 @@ class TraceStore:
         lot_id: str,
         topic: str,
     ) -> str:
-        self._approval_seq += 1
-        request_id = f"apr-{self._approval_seq}"
+        request_id = uuid.uuid4().hex
         with self._conn:
             self._conn.execute(
                 """INSERT INTO approval_queue (

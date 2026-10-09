@@ -309,7 +309,7 @@ def test_enqueue_and_update_approval(store):
         lot_id="L0001",
         topic="plant/etch/ETC-01/command",
     )
-    assert rid.startswith("apr-")
+    assert len(rid) == 32 and all(c in "0123456789abcdef" for c in rid)
     pending = store.list_approvals(status="pending")
     assert len(pending) == 1
     assert pending[0]["request_id"] == rid
@@ -348,6 +348,37 @@ def test_record_episode_no_chain_without_t_decide(store):
     store.record_episode(make_episode("E011", t_detect=300.0))
     rows = store._conn.execute("SELECT * FROM trace_chain").fetchall()
     assert len(rows) == 0
+
+
+def test_enqueue_approval_survives_reopen(tmp_path):
+    path = tmp_path / "trace.db"
+    with TraceStore(path) as s:
+        rid1 = s.enqueue_approval(
+            t_submit=1.0,
+            process="etch",
+            equipment="ETC-01",
+            command="hold_lot",
+            params={"lot_id": "L0001"},
+            source="edge",
+            lot_id="L0001",
+            topic="plant/etch/ETC-01/command",
+        )
+    with TraceStore(path) as s:
+        rid2 = s.enqueue_approval(
+            t_submit=2.0,
+            process="etch",
+            equipment="ETC-01",
+            command="hold_lot",
+            params={"lot_id": "L0002"},
+            source="edge",
+            lot_id="L0002",
+            topic="plant/etch/ETC-01/command",
+        )
+    assert rid1 != rid2
+    with TraceStore(path) as s:
+        pending = s.list_approvals(status="pending")
+        assert len(pending) == 2
+        assert {p["request_id"] for p in pending} == {rid1, rid2}
 
 
 def test_dump_includes_approval_and_chain(store):
