@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 from bench.schema import TraceStore
 from common import topics
@@ -81,6 +81,34 @@ def test_no_twin_param_tune_enqueues_with_human_gate():
     ablation = AblationConfig(use_human_gate=True)
     plant, bus, store, _, _ = make_guarded(ablation=ablation, twin=None)
     publish(bus, "plating", "set_current_density", {"asd": 2.0})
+    steps(plant)
+    pending = store.list_approvals("pending")
+    assert len(pending) == 1
+    assert pending[0]["command"] == "set_current_density"
+    assert not any(
+        a.command == "set_current_density" and a.accepted for a in store.actions()
+    )
+
+
+def test_twin_lookahead_off_high_risk_stamps_without_simulate():
+    """use_twin_lookahead=False + high-risk must not call simulate; Gate 3 auto-stamps."""
+    ablation = AblationConfig(use_twin_lookahead=False, use_human_gate=False)
+    plant, bus, store, _, _ = make_guarded(ablation=ablation, twin=None)
+    publish(bus, "plating", "set_current_density", {"asd": 2.4})
+    steps(plant)
+    accepted = [
+        a for a in store.actions() if a.command == "set_current_density" and a.accepted
+    ]
+    assert accepted
+    assert any("high_risk_auto" in a.reason for a in accepted)
+    assert store.list_approvals("pending") == []
+
+
+def test_no_twin_high_risk_param_tune_enqueues_with_human_gate():
+    """twin=None + human gate + high-risk param_tune → enqueue, no exception."""
+    ablation = AblationConfig(use_human_gate=True)
+    plant, bus, store, _, _ = make_guarded(ablation=ablation, twin=None)
+    publish(bus, "plating", "set_current_density", {"asd": 2.4})
     steps(plant)
     pending = store.list_approvals("pending")
     assert len(pending) == 1
