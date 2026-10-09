@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from bench.schema import TraceStore
+from bench.schema import ACTION_WEIGHTS, SOURCES, TraceStore
 
 PIPELINE_LATENCY_S = 3 * 1800.0
 
@@ -140,12 +140,21 @@ def _mttc_one(fault, rows: list[dict], faults, theta: float) -> tuple[str, float
         return "no_impact", 0.0
     t_s = max(affected[-1]["t_aoi_ref"], fault.t_start + PIPELINE_LATENCY_S)
     tail = [row for row in rows if row["t_aoi_ref"] > t_s]
-    if not math.isnan(theta):
-        for i in range(len(tail) - 4):
-            window = tail[i : i + 5]
-            if all(row["rate"] <= theta for row in window):
-                return "recovered", window[-1]["t_aoi_ref"] - fault.t_start
+    recovered_t = _five_lot_recovery_t(tail, theta)
+    if recovered_t is not None:
+        return "recovered", recovered_t - fault.t_start
     return "censored", None
+
+
+def _five_lot_recovery_t(rows: list[dict], theta: float) -> float | None:
+    """最早连续 5 个批次缺陷率 ≤ θ 时，第 5 个批次的 t_aoi。凑不齐则 None。"""
+    if math.isnan(theta):
+        return None
+    for i in range(len(rows) - 4):
+        window = rows[i : i + 5]
+        if all(row["rate"] <= theta for row in window):
+            return float(window[-1]["t_aoi_ref"])
+    return None
 
 
 def _t_correct(fault, rows: list[dict], faults, theta: float) -> float:
@@ -459,3 +468,98 @@ def guard_error_rates(store: TraceStore) -> dict[str, float]:
         "false_accept_rate": _ratio(false_accept, should_reject),
         "false_reject_rate": _ratio(false_reject, should_accept),
     }
+
+
+CONFLICT_T_S = 300.0
+
+
+def _source_entropy(counts: dict[str, int]) -> float:
+    total = sum(counts.values())
+    if total <= 0:
+        return float("nan")
+    entropy = 0.0
+    for source in SOURCES:
+        count = counts.get(source, 0)
+        if count <= 0:
+            continue
+        p = count / total
+        entropy -= p * math.log(p)
+    return entropy / math.log(len(SOURCES))
+
+
+def _next_same_process_detect(episode, episodes) -> float:
+    later = [
+        other.t_detect
+        for other in episodes
+        if other.episode_id != episode.episode_id
+        and other.process == episode.process
+        and (other.t_detect, other.episode_id) > (episode.t_detect, episode.episode_id)
+    ]
+    return min(later) if later else math.inf
+
+
+def _episode_success(episode, episodes, rows: list[dict], theta: float) -> bool:
+    deadline = _next_same_process_detect(episode, episodes)
+    window = [row for row in rows if episode.t_detect <= row["t_aoi_ref"] < deadline]
+    return _five_lot_recovery_t(window, theta) is not None
+
+
+def arg(store: TraceStore) -> float:
+    """边缘未独立且未越界完成的处置占比。无处置时为 nan。"""
+    episodes = store.episodes()
+    if not episodes:
+        return float("nan")
+    rows = _lot_rows(store)
+    theta = recovery_threshold(baseline_defect_rate(store))
+    succeeded = sum(
+        1
+        for episode in episodes
+        if episode.handler == "edge"
+        and not episode.violated
+        and _episode_success(episode, episodes, rows, theta)
+    )
+    return 1.0 - succeeded / len(episodes)
+
+
+def caf(store: TraceStore, window_s: float = 1800) -> dict[str, float]:
+    """执行器×时间窗的归一化来源熵，以及 T=300s 的跨来源覆盖率。"""
+    actions = store.actions()
+    buckets: dict[tuple[str, int], dict[str, int]] = {}
+    for action in actions:
+        if not action.accepted:
+            continue
+        key = (action.equipment, math.floor(action.t / window_s))
+        bucket = buckets.setdefault(key, {})
+        bucket[action.source] = bucket.get(action.source, 0) + 1
+    if buckets:
+        caf_value = sum(_source_entropy(counts) for counts in buckets.values()) / len(buckets)
+    else:
+        caf_value = float("nan")
+    if not actions:
+        conflict = float("nan")
+    else:
+        conflicted = sum(
+            1
+            for action in actions
+            if any(
+                other.equipment == action.equipment
+                and other.source != action.source
+                and 0 < other.t - action.t <= CONFLICT_T_S
+                for other in actions
+            )
+        )
+        conflict = conflicted / len(actions)
+    return {"caf": float(caf_value), "conflict_rate": float(conflict)}
+
+
+def es(store: TraceStore) -> float:
+    """每千块拼板的不可逆加权动作量。无拼板时为 nan。"""
+    n_panels = len(store.panels())
+    if n_panels == 0:
+        return float("nan")
+    total = 0.0
+    for action in store.actions():
+        if not action.accepted or action.rolled_back:
+            continue
+        total += ACTION_WEIGHTS[action.category] * action.affected_panels
+    return total / n_panels * 1000.0

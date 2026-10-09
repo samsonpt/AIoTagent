@@ -4,11 +4,14 @@ import pytest
 
 from bench.metrics import (
     PIPELINE_LATENCY_S,
+    arg,
     bit_life_utilization,
+    caf,
     decision_latency,
     dosing_consumption,
     drill_break_count,
     envelope_violations,
+    es,
     false_action_count,
     fpr,
     guard_error_rates,
@@ -18,7 +21,7 @@ from bench.metrics import (
     twin_recalibration_time,
     unplanned_downtime_s,
 )
-from bench.schema import ActionRecord, EpisodeRecord, FaultRecord, PanelRecord, TraceStore
+from bench.schema import SOURCES, ActionRecord, EpisodeRecord, FaultRecord, PanelRecord, TraceStore
 
 
 def _panel(pid, lot, t_aoi, defects, root):
@@ -358,3 +361,154 @@ def test_guard_error_rates_empty_store_is_nan(store: TraceStore):
     out = guard_error_rates(store)
     assert math.isnan(out["false_accept_rate"])
     assert math.isnan(out["false_reject_rate"])
+
+
+def _lot(store: TraceStore, lot: str, t_aoi: float, n_defect: int = 0) -> None:
+    for i in range(12):
+        defects = [{"type": "open", "zone": [0, 0], "stage": "etch", "cause": "etch"}] if i < n_defect else []
+        root = "etch" if i < n_defect else "none"
+        store.record_panel(_panel(f"{lot}-P{i}", lot, t_aoi, defects, root))
+
+
+def _arg_warmup(store: TraceStore) -> None:
+    """故障前一批全好 → b=0，θ=1/12。2/12 缺陷批超过阈值。"""
+    _lot(store, "W0", 1000.0)
+    store.record_fault(FaultRecord(
+        "fw", "etch", "e", "nozzle_clog", {}, t_start=5000.0,
+    ))
+
+
+def _act(t, equipment, source, *, accepted=True, category="param_tune", affected=1, rolled_back=False):
+    return ActionRecord(
+        t=t,
+        process="etch",
+        equipment=equipment,
+        command="x",
+        params={},
+        source=source,
+        category=category,
+        affected_panels=affected,
+        accepted=accepted,
+        rolled_back=rolled_back,
+    )
+
+
+def test_es_weights(store: TraceStore):
+    for i in range(10):
+        store.record_panel(_panel(f"P{i}", "L0", 1000.0, [], "none"))
+    store.record_action(ActionRecord(
+        t=1, process="etch", equipment="etch", command="x", params={},
+        source="edge", category="param_tune", affected_panels=10,
+        accepted=True, rolled_back=False,
+    ))
+    # ES = 0.1 * 10 / 10 * 1000 = 100
+    assert es(store) == pytest.approx(100.0)
+
+
+def test_es_excludes_rejected_and_rolled_back(store: TraceStore):
+    for i in range(10):
+        store.record_panel(_panel(f"P{i}", "L0", 1000.0, [], "none"))
+    store.record_action(_act(1, "etch", "edge", category="scrap", affected=10, accepted=False))
+    store.record_action(_act(2, "etch", "edge", category="scrap", affected=10, rolled_back=True))
+    store.record_action(_act(3, "etch", "edge", category="dosing", affected=5))
+    # 只剩 0.2 * 5 / 10 * 1000 = 100
+    assert es(store) == pytest.approx(100.0)
+
+
+def test_es_nan_without_panels_and_zero_without_actions(store: TraceStore):
+    assert math.isnan(es(store))
+    store.record_panel(_panel("P0", "L0", 1000.0, [], "none"))
+    assert es(store) == pytest.approx(0.0)
+
+
+def test_caf_mean_normalized_entropy(store: TraceStore):
+    # k1 窗 0：两条 edge；被拒绝的 human 不进熵
+    store.record_action(_act(100.0, "k1", "edge"))
+    store.record_action(_act(200.0, "k1", "edge"))
+    store.record_action(_act(150.0, "k1", "human", accepted=False))
+    # t=1800 → floor(t/1800)=1，与 t=1900 同窗，edge/cloud 各半
+    store.record_action(_act(1800.0, "k1", "edge"))
+    store.record_action(_act(1900.0, "k1", "cloud"))
+    for i, source in enumerate(SOURCES):
+        store.record_action(_act(100.0 + i, "k2", source))
+    h_half = math.log(2) / math.log(len(SOURCES))
+    assert caf(store)["caf"] == pytest.approx((0.0 + h_half + 1.0) / 3)
+
+
+def test_caf_window_s_splits_bins(store: TraceStore):
+    store.record_action(_act(100.0, "k1", "edge"))
+    store.record_action(_act(1500.0, "k1", "cloud"))
+    assert caf(store, window_s=1000)["caf"] == pytest.approx(0.0)
+    assert caf(store)["caf"] == pytest.approx(math.log(2) / math.log(len(SOURCES)))
+
+
+def test_conflict_rate_other_source_within_300s(store: TraceStore):
+    # Δ=300 覆盖；Δ=301 不覆盖；同来源、另一执行器不覆盖。未接受的指令仍进入冲突分母。
+    store.record_action(_act(0.0, "m1", "edge"))
+    store.record_action(_act(10.0, "m1", "human", accepted=False))
+    store.record_action(_act(300.0, "m1", "cloud"))
+    store.record_action(_act(601.0, "m1", "peer"))
+    store.record_action(_act(0.0, "m2", "edge"))
+    store.record_action(_act(100.0, "m2", "edge"))
+    # 被覆盖：t=0 的 edge、t=10 的 human。6 条里 2 条。
+    assert caf(store)["conflict_rate"] == pytest.approx(2.0 / 6.0)
+
+
+def test_caf_empty_is_nan(store: TraceStore):
+    out = caf(store)
+    assert math.isnan(out["caf"])
+    assert math.isnan(out["conflict_rate"])
+
+
+def test_arg_five_consecutive_lots(store: TraceStore):
+    _arg_warmup(store)
+    store.record_episode(EpisodeRecord("e1", "etch", "spike", 6000.0, "edge", t_recover=None))
+    _lot(store, "B0", 6100.0, n_defect=2)
+    for k, t in enumerate([6200, 6300, 6400, 6500, 6600]):
+        _lot(store, f"G{k}", float(t))
+    assert arg(store) == pytest.approx(0.0)
+
+
+def test_arg_counts_only_edge_without_violation(store: TraceStore):
+    _arg_warmup(store)
+    for k, t in enumerate([6100, 6200, 6300, 6400, 6500]):
+        _lot(store, f"G{k}", float(t))
+    store.record_episode(EpisodeRecord("e-edge", "etch", "spike", 6000.0, "edge"))
+    store.record_episode(EpisodeRecord("e-human", "drill", "spike", 6000.0, "human"))
+    store.record_episode(EpisodeRecord("e-bad", "plating", "spike", 6000.0, "edge", violated=True))
+    assert arg(store) == pytest.approx(1.0 - 1.0 / 3.0)
+
+
+def test_arg_recovery_must_finish_before_next_same_process(store: TraceStore):
+    _arg_warmup(store)
+    store.record_episode(EpisodeRecord("e1", "etch", "spike", 6000.0, "edge"))
+    store.record_episode(EpisodeRecord("e2", "etch", "spike", 6400.0, "edge"))
+    _lot(store, "B0", 6100.0, n_defect=2)
+    for k, t in enumerate([6500, 6600, 6700, 6800, 6900]):
+        _lot(store, f"G{k}", float(t))
+    assert arg(store) == pytest.approx(0.5)
+
+
+def test_arg_other_process_does_not_close_window(store: TraceStore):
+    _arg_warmup(store)
+    store.record_episode(EpisodeRecord("e1", "etch", "spike", 6000.0, "edge"))
+    store.record_episode(EpisodeRecord("e2", "drill", "spike", 6300.0, "edge"))
+    _lot(store, "B0", 6100.0, n_defect=2)
+    for k, t in enumerate([6400, 6500, 6600, 6700, 6800]):
+        _lot(store, f"G{k}", float(t))
+    assert arg(store) == pytest.approx(0.0)
+
+
+def test_arg_censored_ignores_self_reported_t_recover(store: TraceStore):
+    _arg_warmup(store)
+    store.record_episode(EpisodeRecord("e1", "etch", "spike", 6000.0, "edge", t_recover=100.0))
+    for k, t in enumerate([6100, 6200, 6300, 6400]):
+        _lot(store, f"G{k}", float(t))
+    assert arg(store) == pytest.approx(1.0)
+
+
+def test_arg_nan_without_episodes(store: TraceStore):
+    _arg_warmup(store)
+    for k, t in enumerate([6100, 6200, 6300, 6400, 6500]):
+        _lot(store, f"G{k}", float(t))
+    assert math.isnan(arg(store))
