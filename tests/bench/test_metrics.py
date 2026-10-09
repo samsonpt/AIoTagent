@@ -194,7 +194,9 @@ def test_llm_usage_sums_detail_fields():
         [
             {"llm_calls": 2, "llm_tokens": 100},
             {"llm_calls": 1, "tokens": 40},
+            {"llm_calls": 3, "token_usage": {"total": 10}},
             {},
         ]
     )
-    assert usage == {"llm_calls": 3.0, "llm_tokens": 140.0}
+    assert usage["llm_calls"] == pytest.approx(6.0)
+    assert usage["llm_tokens"] == pytest.approx(150.0)

@@ -32,3 +32,6 @@ testpaths = ["tests"]
 # langsmith 的 pytest 插件在加载时 import requests，环境依赖版本不匹配会在 filterwarnings 生效前输出警告
 addopts = "-q --import-mode=importlib -p no:langsmith_plugin"
 pythonpath = ["."]
+markers = [
+    "live: 需要 DEEPSEEK_API_KEY 的真实 API 测试",
+]
