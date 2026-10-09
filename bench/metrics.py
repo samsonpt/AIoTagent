@@ -563,3 +563,139 @@ def es(store: TraceStore) -> float:
             continue
         total += ACTION_WEIGHTS[action.category] * action.affected_panels
     return total / n_panels * 1000.0
+
+
+COMPUTE_ALL_KEYS = (
+    "fpy",
+    "scrap_rate",
+    "mttd_mean",
+    "mttd_n",
+    "mttd_n_undetected",
+    "mttc_mean",
+    "mttc_n",
+    "mttc_n_no_impact",
+    "mttc_n_censored",
+    "bit_life_utilization",
+    "drill_break_count",
+    "unplanned_downtime_s",
+    "dosing_consumption",
+    "envelope_violations",
+    "false_action_count",
+    "llm_calls",
+    "llm_tokens",
+    "decision_latency_p50",
+    "decision_latency_p95",
+    "outage_fpy_retention",
+    "copper_mape",
+    "linewidth_mape",
+    "coverage90_copper",
+    "coverage90_linewidth",
+    "twin_recalibration_s",
+    "root_cause_top1",
+    "guard_false_accept_rate",
+    "guard_false_reject_rate",
+    "fpr",
+    "fpr_cross_process_ratio",
+    "fpr_n_faults",
+    "arg",
+    "caf",
+    "conflict_rate",
+    "es",
+)
+
+
+def _twin_metric_arrays(twin_preds: dict, kind: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    block = twin_preds.get(kind)
+    if not isinstance(block, dict):
+        return None
+    y = block.get("y")
+    yhat = block.get("yhat")
+    q05 = block.get("q05")
+    q95 = block.get("q95")
+    if y is None or yhat is None or q05 is None or q95 is None:
+        return None
+    return (
+        np.asarray(y, dtype=float),
+        np.asarray(yhat, dtype=float),
+        np.asarray(q05, dtype=float),
+        np.asarray(q95, dtype=float),
+    )
+
+
+def compute_all(
+    store: TraceStore,
+    *,
+    twin_preds: dict | None = None,
+    eval_extras: dict | None = None,
+) -> dict[str, float]:
+    mttd_out = mttd(store)
+    mttc_out = mttc(store)
+    fpr_out = fpr(store)
+    latency = decision_latency(store)
+    guard = guard_error_rates(store)
+    caf_out = caf(store)
+    usage = llm_usage(ep.detail for ep in store.episodes())
+
+    nan = float("nan")
+    copper_mape_val = nan
+    linewidth_mape_val = nan
+    coverage90_copper_val = nan
+    coverage90_linewidth_val = nan
+    twin_recal_val = nan
+    if twin_preds is not None:
+        copper = _twin_metric_arrays(twin_preds, "copper")
+        if copper is not None:
+            y, yhat, q05, q95 = copper
+            copper_mape_val = mape(y, yhat)
+            coverage90_copper_val = coverage90(y, q05, q95)
+        linewidth = _twin_metric_arrays(twin_preds, "linewidth")
+        if linewidth is not None:
+            y, yhat, q05, q95 = linewidth
+            linewidth_mape_val = mape(y, yhat)
+            coverage90_linewidth_val = coverage90(y, q05, q95)
+        twin_recal_val = twin_recalibration_time(store, twin_preds.get("mape_series"))
+
+    if eval_extras is not None:
+        predicted = eval_extras.get("root_cause_predicted", eval_extras.get("predicted", []))
+        truth = eval_extras.get("root_cause_truth", eval_extras.get("truth", []))
+        root_cause_top1_val = root_cause_top1(predicted, truth)
+    else:
+        root_cause_top1_val = nan
+
+    return {
+        "fpy": fpy(store),
+        "scrap_rate": scrap_rate(store),
+        "mttd_mean": float(mttd_out["mean"]),
+        "mttd_n": float(mttd_out["n"]),
+        "mttd_n_undetected": float(mttd_out["n_undetected"]),
+        "mttc_mean": float(mttc_out["mean"]),
+        "mttc_n": float(mttc_out["n"]),
+        "mttc_n_no_impact": float(mttc_out["n_no_impact"]),
+        "mttc_n_censored": float(mttc_out["n_censored"]),
+        "bit_life_utilization": bit_life_utilization(store),
+        "drill_break_count": drill_break_count(store),
+        "unplanned_downtime_s": unplanned_downtime_s(store),
+        "dosing_consumption": dosing_consumption(store),
+        "envelope_violations": envelope_violations(store),
+        "false_action_count": false_action_count(store),
+        "llm_calls": float(usage["llm_calls"]),
+        "llm_tokens": float(usage["llm_tokens"]),
+        "decision_latency_p50": float(latency["p50"]),
+        "decision_latency_p95": float(latency["p95"]),
+        "outage_fpy_retention": outage_fpy_retention(store),
+        "copper_mape": copper_mape_val,
+        "linewidth_mape": linewidth_mape_val,
+        "coverage90_copper": coverage90_copper_val,
+        "coverage90_linewidth": coverage90_linewidth_val,
+        "twin_recalibration_s": twin_recal_val,
+        "root_cause_top1": root_cause_top1_val,
+        "guard_false_accept_rate": float(guard["false_accept_rate"]),
+        "guard_false_reject_rate": float(guard["false_reject_rate"]),
+        "fpr": float(fpr_out.fpr),
+        "fpr_cross_process_ratio": float(fpr_out.cross_process_ratio),
+        "fpr_n_faults": float(fpr_out.n_faults),
+        "arg": arg(store),
+        "caf": float(caf_out["caf"]),
+        "conflict_rate": float(caf_out["conflict_rate"]),
+        "es": es(store),
+    }

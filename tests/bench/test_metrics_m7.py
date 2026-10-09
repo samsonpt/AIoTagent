@@ -3,10 +3,12 @@ import math
 import pytest
 
 from bench.metrics import (
+    COMPUTE_ALL_KEYS,
     PIPELINE_LATENCY_S,
     arg,
     bit_life_utilization,
     caf,
+    compute_all,
     decision_latency,
     dosing_consumption,
     drill_break_count,
@@ -512,3 +514,10 @@ def test_arg_nan_without_episodes(store: TraceStore):
     for k, t in enumerate([6100, 6200, 6300, 6400, 6500]):
         _lot(store, f"G{k}", float(t))
     assert math.isnan(arg(store))
+
+
+def test_compute_all_keys_on_empty_store(store: TraceStore):
+    out = compute_all(store)
+    assert set(out.keys()) == set(COMPUTE_ALL_KEYS)
+    for key, value in out.items():
+        assert isinstance(value, float), f"{key} is {type(value)}"
