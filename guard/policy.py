@@ -90,7 +90,7 @@ def map_command_to_twin(
         if "additive_ml_l" in params:
             out["additive_ml_l"] = float(params["additive_ml_l"])
         elif "ml_l" in params:
-            out["additive_ml_l"] = float(params["ml_l"])
+            out["additive_ml_l"] = float(out["additive_ml_l"]) + float(params["ml_l"])
         return "thickness", out
 
     if command == "set_etch_temp":

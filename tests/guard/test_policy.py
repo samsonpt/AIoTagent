@@ -32,6 +32,15 @@ def test_fast_path_and_high_risk_constants():
     assert PARAM_TUNE_REL_THRESHOLD == 0.25
 
 
+def test_map_dose_additive_ml_l_uses_target_plus_dose():
+    target = RECIPE.window("plating", "additive_ml_l").target
+    kind, params = map_command_to_twin(
+        RECIPE, "plating", "dose_additive", {"ml_l": 0.5}
+    )
+    assert kind == "thickness"
+    assert params["additive_ml_l"] == target + 0.5
+
+
 def test_map_set_current_density_to_thickness():
     mapped = map_command_to_twin(
         RECIPE, "plating", "set_current_density", {"asd": 2.2}
