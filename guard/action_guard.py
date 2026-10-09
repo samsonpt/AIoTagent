@@ -58,7 +58,9 @@ class ActionGuard:
         bus.subscribe(topics.line_command(), self._on_command, self.client_id)
 
     def on_tick(self, clock) -> None:
-        return None
+        ok, _reason = self._store.verify_chain()
+        if ok is False:
+            self.auto_actions_enabled = False
 
     def resolve_approval(self, request_id: str, approved: bool, reason: str) -> None:
         rows = [r for r in self._store.list_approvals() if r["request_id"] == request_id]
@@ -130,14 +132,15 @@ class ActionGuard:
 
         # Gate 2 — twin lookahead (§4.3: no twin / disabled → no auto-stamp)
         if not self._ablation.use_twin_lookahead or self._twin is None:
-            twin_reason = (
-                "twin_disabled" if not self._ablation.use_twin_lookahead else "no_twin"
-            )
-            if self._ablation.use_human_gate:
-                self._enqueue(topic, process, equipment, command, params, source, lot_id)
+            if not is_high_risk(self._recipe, process, command, params):
+                twin_reason = (
+                    "twin_disabled" if not self._ablation.use_twin_lookahead else "no_twin"
+                )
+                if self._ablation.use_human_gate:
+                    self._enqueue(topic, process, equipment, command, params, source, lot_id)
+                    return
+                self._reject(process, equipment, command, params, source, twin_reason, lot_id)
                 return
-            self._reject(process, equipment, command, params, source, twin_reason, lot_id)
-            return
 
         mapped = map_command_to_twin(self._recipe, process, command, params)
         if mapped is None:
