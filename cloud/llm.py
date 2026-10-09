@@ -12,6 +12,15 @@ class LlmClient(Protocol):
     def complete(self, messages: list[dict], *, response_model: type[BaseModel]) -> BaseModel: ...
 
 
+_NOOP_SUPERVISOR = {"route": "end", "reason": "noop"}
+
+
+def default_fake_llm(*, supervisor_cycles: int = 512) -> "FakeLLM":
+    return FakeLLM(
+        {"SupervisorDecision": [_NOOP_SUPERVISOR.copy() for _ in range(supervisor_cycles)]}
+    )
+
+
 class FakeLLM:
     def __init__(self, scripts: dict[str, list[dict] | dict]) -> None:
         self._scripts: dict[str, list[dict]] = {}

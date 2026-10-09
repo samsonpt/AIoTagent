@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cloud.llm import DeepSeekLLM, FakeLLM
+from cloud.llm import DeepSeekLLM, FakeLLM, default_fake_llm
 from cloud.schemas import (
     MaintPlan,
     RootCauseHypothesis,
@@ -9,6 +9,15 @@ from cloud.schemas import (
     TuneCandidate,
     TunePlan,
 )
+
+
+def test_default_fake_llm_supervisor_noop_many_times():
+    llm = default_fake_llm(supervisor_cycles=4)
+    for _ in range(4):
+        out = llm.complete([], response_model=SupervisorDecision)
+        assert out.route == "end"
+    with pytest.raises(KeyError, match="SupervisorDecision"):
+        llm.complete([], response_model=SupervisorDecision)
 
 
 def test_fake_llm_returns_scripted_model():

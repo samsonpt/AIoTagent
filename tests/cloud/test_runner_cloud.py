@@ -25,3 +25,9 @@ def test_edge_only_does_not_subscribe_cloud():
 def test_use_cloud_short_run_does_not_crash():
     ablation = AblationConfig(name="cloud_on", use_rag=False, use_counterfactual_rca=False)
     run(load_scenario(SCENARIOS / "nominal.yaml"), TraceStore(), ablation=ablation, n_ticks=8)
+
+
+def test_use_cloud_nominal_length_without_api_key(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    ablation = AblationConfig(name="cloud_on", use_rag=False, use_counterfactual_rca=False)
+    run(load_scenario(SCENARIOS / "nominal.yaml"), TraceStore(), ablation=ablation, n_ticks=48)

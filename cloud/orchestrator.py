@@ -5,7 +5,7 @@ import statistics
 from pathlib import Path
 
 from cloud.graph import build_cloud_graph, run_cloud_graph
-from cloud.llm import DeepSeekLLM, FakeLLM, LlmClient
+from cloud.llm import DeepSeekLLM, FakeLLM, LlmClient, default_fake_llm
 from cloud.rag import KnowledgeBase
 from cloud.tools import CloudTools
 from common import topics
@@ -85,7 +85,7 @@ class CloudOrchestrator:
             if os.environ.get("DEEPSEEK_API_KEY"):
                 llm = DeepSeekLLM()
             else:
-                llm = FakeLLM({})
+                llm = default_fake_llm()
         return cls(
             bus,
             recipe,

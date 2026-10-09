@@ -11,6 +11,7 @@ from bench.schema import TraceStore
 from common.bus import Bus, InMemoryBus
 from common.clock import SimClock
 from common.config import AblationConfig, load_ablation
+from common.env import load_env
 from common.recipe import load_recipe
 from cloud.orchestrator import CloudOrchestrator
 from edge.factory import make_controllers
@@ -108,6 +109,7 @@ def summary_json(summary: RunSummary) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    load_env()
     parser = argparse.ArgumentParser(prog="python -m sim.runner", description="运行仿真场景并输出 RunSummary")
     parser.add_argument("scenario", help="场景 YAML 路径")
     parser.add_argument("--db", default=":memory:", help="TraceStore SQLite 路径")

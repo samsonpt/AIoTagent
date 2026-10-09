@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from common.env import load_env
 from ui.db import DashboardStore
 from ui.pages import aoi, approvals, episodes, monitor, trace, twin
 
@@ -24,6 +25,7 @@ def parse_db_arg(argv: list[str] | None = None) -> str | None:
 
 
 def main() -> None:
+    load_env()
     import streamlit as st
 
     st.set_page_config(page_title="AIoT PCB 看板", layout="wide")
