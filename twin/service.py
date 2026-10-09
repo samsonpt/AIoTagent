@@ -3,10 +3,11 @@ from typing import Literal
 
 import numpy as np
 
+from common import topics
 from twin.calibration import RlsGain
 from twin.models import drill, etch, plating
 from twin.models.residual import ResidualQuantiles
-from twin.state import ProcessState
+from twin.state import ProcessState, ScalarFilter
 from twin.types import CounterfactualResult, Prediction, TwinObservation
 
 Kind = Literal["thickness", "width", "roughness"]
@@ -24,6 +25,27 @@ _SIGMA_MECH = {
 }
 _Z90 = 1.645
 _SIGMA_FROM_90 = 3.29
+_TELEMETRY_KEYS = {
+    "sg": "sg",
+    "bath_temp_c": "bath_temp_c",
+    "current_density_asd": "current_density_asd",
+    "spindle_current_a": "spindle_current_a",
+    "bit_hits": "bit_hits",
+    "conveyor_speed_m_min": "conveyor_speed_m_min",
+    "etch_temp_c": "etch_temp_c",
+    "spray_pressure_z1": "spray",
+}
+_FEATURE_KEYS = (
+    "additive_ml_l",
+    "bath_temp_c",
+    "bit_hits",
+    "conveyor_speed_m_min",
+    "current_density_asd",
+    "etch_temp_c",
+    "sg",
+    "spindle_current_a",
+    "spray",
+)
 
 
 def _norm_cdf(z: float) -> float:
@@ -58,6 +80,17 @@ class TwinService:
         self._residual = {kind: ResidualQuantiles(seed=seed) for kind in _KINDS}
         self._resid_x: dict[str, list[list[float]]] = {kind: [] for kind in _KINDS}
         self._resid_y: dict[str, list[float]] = {kind: [] for kind in _KINDS}
+        self._last_thickness_y: float | None = None
+        for process in ("plating", "etch", "drill"):
+            bus.subscribe(topics.telemetry(process), self._on_telemetry, self.client_id)
+        bus.subscribe(topics.lab_assay(), self._on_assay, self.client_id)
+        bus.subscribe(topics.measurement("plating"), self._on_plating_measurement, self.client_id)
+        bus.subscribe(topics.measurement("etch"), self._on_etch_measurement, self.client_id)
+
+    def on_tick(self, clock) -> None:
+        self.clock = clock
+        for filt in self.state.filters.values():
+            filt.predict(u=0.0)
 
     def simulate(self, params: dict, *, kind: Kind) -> Prediction:
         if self.fidelity == "none":
@@ -96,6 +129,72 @@ class TwinService:
 
     def observe_width(self, y: float, params: dict) -> None:
         self._observe(float(y), params, "width")
+
+    def _on_assay(self, topic: str, payload: dict) -> None:
+        if payload.get("process") != "plating":
+            return
+        values = payload.get("values") or {}
+        if "additive_ml_l" not in values:
+            return
+        self._upsert_filter("additive_ml_l", float(values["additive_ml_l"]))
+
+    def _on_telemetry(self, topic: str, payload: dict) -> None:
+        values = payload.get("values") or {}
+        for src, dest in _TELEMETRY_KEYS.items():
+            if src in values:
+                self._upsert_filter(dest, float(values[src]))
+
+    def _on_plating_measurement(self, topic: str, payload: dict) -> None:
+        y = float(np.mean(payload["zones"]))
+        self._last_thickness_y = y
+        self.observe_thickness(y, self._thickness_params(payload))
+
+    def _on_etch_measurement(self, topic: str, payload: dict) -> None:
+        y = float(np.mean(payload["zones"]))
+        self.observe_width(y, self._width_params(payload))
+
+    def _upsert_filter(self, key: str, z: float) -> None:
+        if key not in self.state.filters:
+            self.state.set_filter(key, ScalarFilter(x0=float(z)))
+            return
+        self.state.filters[key].update(float(z))
+
+    def _state_or(self, key: str, default: float) -> float:
+        if key in self.state.filters:
+            return self.state.get(key)
+        return float(default)
+
+    def _thickness_params(self, payload: dict) -> dict:
+        return {
+            "asd": self._state_or(
+                "current_density_asd",
+                self.recipe.window("plating", "current_density_asd").target,
+            ),
+            "time_min": float(self.recipe.constants["plating_time_min"]),
+            "additive_ml_l": self._state_or(
+                "additive_ml_l",
+                self.recipe.window("plating", "additive_ml_l").target,
+            ),
+            "lot_id": payload.get("lot_id"),
+        }
+
+    def _width_params(self, payload: dict) -> dict:
+        thickness = 25.0 if self._last_thickness_y is None else self._last_thickness_y
+        return {
+            "sg": self._state_or("sg", self.recipe.window("etch", "sg").target),
+            "temp_c": self._state_or(
+                "etch_temp_c", self.recipe.window("etch", "etch_temp_c").target
+            ),
+            "spray_bar": self._state_or(
+                "spray", self.recipe.window("etch", "spray_pressure_bar").target
+            ),
+            "speed_m_min": self._state_or(
+                "conveyor_speed_m_min",
+                self.recipe.window("etch", "conveyor_speed_m_min").target,
+            ),
+            "thickness_um": thickness,
+            "lot_id": payload.get("lot_id"),
+        }
 
     def _predict(self, params: dict, kind: str) -> Prediction:
         mech = self._mechanistic(params, kind)
@@ -177,5 +276,4 @@ class TwinService:
         raise ValueError(f"unknown kind: {kind}")
 
     def _features(self, mech: float) -> list[float]:
-        scalars = [self.state.filters[key].x for key in sorted(self.state.filters)]
-        return [float(mech), *scalars]
+        return [float(mech), *[self._state_or(key, 0.0) for key in _FEATURE_KEYS]]

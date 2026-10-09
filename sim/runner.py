@@ -15,6 +15,7 @@ from common.recipe import load_recipe
 from edge.factory import make_controllers
 from sim.faults import Scenario, load_scenario
 from sim.plant import Plant
+from twin.service import TwinService
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,6 +52,16 @@ def run(
         recipe_path = Path(scenario.recipe_path)
         recipe = load_recipe(recipe_path if recipe_path.is_absolute() else ROOT / recipe_path)
         extra = [*make_controllers(ablation, bus, recipe, clock, store, scenario.seed), *extra]
+        if ablation.use_twin_lookahead and ablation.twin_fidelity != "none":
+            extra.append(
+                TwinService(
+                    bus,
+                    recipe,
+                    clock,
+                    fidelity=ablation.twin_fidelity,
+                    seed=scenario.seed,
+                )
+            )
     for _ in range(scenario.n_ticks if n_ticks is None else n_ticks):
         plant.step_tick()
         for controller in extra:
