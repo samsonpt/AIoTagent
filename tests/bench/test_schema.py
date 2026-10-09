@@ -396,3 +396,16 @@ def test_dump_includes_approval_and_chain(store):
     dumped = store.dump()
     assert "approval_queue" in dumped
     assert "trace_chain" in dumped
+
+
+def test_unapplied_decisions_and_mark():
+    store = TraceStore()
+    rid = store.enqueue_approval(
+        t_submit=0.0, process="line", equipment="line", command="hold_lot",
+        params={"lot_id": "L1"}, source="edge", lot_id="L1", topic="plant/line/command",
+    )
+    store.update_approval(rid, status="approved", t_decide=1.0, decider="ui", reason="ok")
+    rows = store.list_unapplied_decisions()
+    assert len(rows) == 1 and rows[0]["request_id"] == rid and rows[0]["applied"] == 0
+    store.mark_approval_applied(rid)
+    assert store.list_unapplied_decisions() == []

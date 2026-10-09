@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS telemetry (t REAL, process TEXT, equipment TEXT, key 
 CREATE TABLE IF NOT EXISTS approval_queue (
     request_id TEXT PRIMARY KEY, t_submit REAL, process TEXT, equipment TEXT, command TEXT,
     params TEXT, source TEXT, lot_id TEXT, topic TEXT, status TEXT, t_decide REAL, decider TEXT,
-    reason TEXT
+    reason TEXT, applied INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS trace_chain (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, lot_id TEXT, kind TEXT, ref TEXT, t REAL, payload TEXT,
@@ -166,7 +166,17 @@ class TraceStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
+        self._ensure_approval_applied_column()
         self._conn.commit()
+
+    def _ensure_approval_applied_column(self) -> None:
+        try:
+            self._conn.execute(
+                "ALTER TABLE approval_queue ADD COLUMN applied INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
 
     def _insert(self, table: str, rec, *, replace: bool = False, exclude: tuple[str, ...] = ()) -> int:
         names, values = _encode(rec, exclude)
@@ -262,8 +272,8 @@ class TraceStore:
             self._conn.execute(
                 """INSERT INTO approval_queue (
                     request_id, t_submit, process, equipment, command, params, source,
-                    lot_id, topic, status, t_decide, decider, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    lot_id, topic, status, t_decide, decider, reason, applied
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     request_id,
                     t_submit,
@@ -278,6 +288,7 @@ class TraceStore:
                     None,
                     None,
                     None,
+                    0,
                 ),
             )
         return request_id
@@ -296,8 +307,26 @@ class TraceStore:
         for row in rows:
             item = dict(row)
             item["params"] = json.loads(item["params"])
+            item["applied"] = int(item["applied"])
             result.append(item)
         return result
+
+    def list_unapplied_decisions(self) -> list[dict]:
+        rows = self._conn.execute(
+            """SELECT * FROM approval_queue
+               WHERE status IN ('approved', 'rejected') AND applied = 0
+               ORDER BY t_submit, request_id"""
+        )
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["params"] = json.loads(item["params"])
+            item["applied"] = int(item["applied"])
+            result.append(item)
+        return result
+
+    def mark_approval_applied(self, request_id: str) -> None:
+        self._update("approval_queue", "request_id", request_id, {"applied": 1})
 
     def update_approval(
         self,
