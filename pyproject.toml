@@ -9,7 +9,9 @@ description = "PCB 产线自主工艺与运维智能体（AIoT Agentic MVP）"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "langgraph>=0.2",
     "numpy>=1.26",
+    "openai>=1.40",
     "paho-mqtt>=2.0",
     "pydantic>=2.6",
     "pyyaml>=6.0",
