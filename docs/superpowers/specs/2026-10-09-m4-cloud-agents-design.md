@@ -1,7 +1,7 @@
 # M4 云端多智能体 + RAG 设计规格
 
 **日期：** 2026-10-09  
-**状态：** 待审阅  
+**状态：** 已批准  
 **父规格：** `docs/superpowers/specs/2026-10-08-pcb-aiot-agent-design.md` §4.4、§7.2 根因评测、§10 M4  
 **相关 ADR：** ADR-002（LangGraph）、ADR-004（事件触发 LLM）、ADR-003（孪生隔离）
 
