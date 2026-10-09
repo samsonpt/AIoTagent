@@ -102,7 +102,10 @@ def run_matrix(
     resume: bool = True,
     n_ticks: int | None = None,
 ) -> Path:
-    """串行跑矩阵。`resume=True` 时跳过 manifest 里 `status==ok` 的格，失败格重试。"""
+    """串行跑矩阵。`resume=True` 时跳过 manifest 里 `status==ok` 的格，失败格重试。
+
+    写出 results.csv 后调用 write_reports，生成汇总 CSV 与 report.md。
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = out_dir / "manifest.json"
@@ -129,6 +132,10 @@ def run_matrix(
     if not results_path.exists():
         _write_results(results_path, _ordered_rows(cells, rows_by_id))
         _write_manifest(manifest_path, manifest)
+    if results_path.is_file():
+        from bench.report import write_reports
+
+        write_reports(results_path, out_dir)
     return results_path
 
 

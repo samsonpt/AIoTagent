@@ -1,4 +1,4 @@
-"""消融矩阵 CLI。报告汇总留到后续任务，本脚本只写 results.csv 与 manifest.json。"""
+"""消融矩阵 CLI。跑完后由 matrix_runner 调用 write_reports 写出汇总与 report.md。"""
 
 from __future__ import annotations
 
