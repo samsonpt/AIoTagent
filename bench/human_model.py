@@ -20,6 +20,7 @@ class HumanModel:
         seed: int = 0,
         ocap: bool = True,
         approval_delay_s: float = 900,
+        auto_approve: bool = True,
     ):
         self.bus = bus
         self.recipe = recipe
@@ -30,6 +31,7 @@ class HumanModel:
         self.seed = seed
         self.ocap = ocap
         self.approval_delay_s = approval_delay_s
+        self.auto_approve = auto_approve
         self.client_id = "human"
         self._pending: list[tuple[int, dict]] = []
         self._rng = make_rng(seed, "human_approval")
@@ -72,6 +74,8 @@ class HumanModel:
                 )
 
     def _process_approvals(self, clock: SimClock) -> None:
+        if not self.auto_approve:
+            return
         for row in list(self.store.list_approvals("pending")):
             if clock.now < float(row["t_submit"]) + self.approval_delay_s:
                 continue

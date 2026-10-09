@@ -61,6 +61,13 @@ class ActionGuard:
         ok, _reason = self._store.verify_chain()
         if ok is False:
             self.auto_actions_enabled = False
+        for row in self._store.list_unapplied_decisions():
+            approved = row["status"] == "approved"
+            self.resolve_approval(
+                row["request_id"],
+                approved,
+                row.get("reason") or row["status"],
+            )
 
     def resolve_approval(self, request_id: str, approved: bool, reason: str) -> None:
         rows = [r for r in self._store.list_approvals() if r["request_id"] == request_id]
@@ -86,6 +93,7 @@ class ActionGuard:
                 reason=reason,
                 lot_id=row["lot_id"],
             )
+        self._store.mark_approval_applied(request_id)
 
     def _on_command(self, topic: str, payload: dict) -> None:
         if payload.get("guarded") is True:

@@ -45,6 +45,7 @@ def run(
     controllers: Sequence[Controller] = (),
     n_ticks: int | None = None,
     ablation: AblationConfig | None = None,
+    auto_approve: bool = True,
 ) -> RunSummary:
     clock = SimClock()
     bus = bus if bus is not None else InMemoryBus()
@@ -64,7 +65,16 @@ def run(
             )
         guard = ActionGuard(bus, store, recipe, clock, twin, scenario.seed, ablation)
         extra = [
-            *make_controllers(ablation, bus, recipe, clock, store, scenario.seed, guard=guard),
+            *make_controllers(
+                ablation,
+                bus,
+                recipe,
+                clock,
+                store,
+                scenario.seed,
+                guard=guard,
+                auto_approve=auto_approve,
+            ),
             *extra,
         ]
         if twin is not None:

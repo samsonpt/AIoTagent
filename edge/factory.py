@@ -16,6 +16,7 @@ def make_controllers(
     store: TraceStore | None,
     seed: int,
     guard=None,
+    auto_approve: bool = True,
 ) -> list:
     shared = dict(
         bus=bus,
@@ -38,6 +39,7 @@ def make_controllers(
                     guard=guard,
                     seed=seed,
                     ocap=False,
+                    auto_approve=auto_approve,
                 )
             )
         return agents
@@ -45,7 +47,7 @@ def make_controllers(
         ProcessEdgeAgent(process, emit_commands=False, **{**shared, "feedforward": False})
         for process in PROCESSES
     ]
-    human_kwargs: dict = {"ocap": True}
+    human_kwargs: dict = {"ocap": True, "auto_approve": auto_approve}
     if ablation.use_human_gate and store is not None and guard is not None:
         human_kwargs.update(store=store, guard=guard, seed=seed)
     return [*agents, HumanModel(bus, recipe, clock, **human_kwargs)]
