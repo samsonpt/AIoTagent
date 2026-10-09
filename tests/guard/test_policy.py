@@ -1,0 +1,93 @@
+from pathlib import Path
+
+from common.recipe import load_recipe
+from guard.policy import (
+    FAST_PATH,
+    HIGH_RISK_COMMANDS,
+    PARAM_TUNE_REL_THRESHOLD,
+    confidence_from_twin,
+    is_high_risk,
+    map_command_to_twin,
+    passes_twin_gate,
+    twin_thresholds,
+)
+from twin.types import Prediction, TwinObservation
+
+RECIPE = load_recipe(Path(__file__).resolve().parents[2] / "bench" / "recipes" / "PN-4L-001.yaml")
+
+
+def test_thresholds_tighten_when_confidence_low():
+    y_hi, oos_hi = twin_thresholds(1.0)
+    y_lo, oos_lo = twin_thresholds(0.0)
+    assert y_hi == 0.90 and oos_hi == 0.20
+    assert y_lo == 0.95 and oos_lo == 0.05
+    pred = Prediction(mean=1.0, q05=0.9, q95=1.1, yield_prob=0.92, oos_prob=0.08)
+    assert passes_twin_gate(pred, 1.0) is True
+    assert passes_twin_gate(pred, 0.0) is False
+
+
+def test_fast_path_and_high_risk_constants():
+    assert FAST_PATH == frozenset({"stop", "resume", "change_bit"})
+    assert HIGH_RISK_COMMANDS == frozenset({"hold_lot", "scrap_lot"})
+    assert PARAM_TUNE_REL_THRESHOLD == 0.25
+
+
+def test_map_set_current_density_to_thickness():
+    mapped = map_command_to_twin(RECIPE, "plating", "set_current_density", {"asd": 2.2})
+    assert mapped is not None
+    kind, params = mapped
+    assert kind == "thickness"
+    assert params["asd"] == 2.2
+    assert params["time_min"] == RECIPE.constants["plating_time_min"]
+    assert params["additive_ml_l"] == RECIPE.window("plating", "additive_ml_l").target
+
+
+def test_map_clean_nozzle_returns_none():
+    assert map_command_to_twin(RECIPE, "etch", "clean_nozzle", {"zone": 1}) is None
+
+
+def test_map_set_bath_temp_returns_none():
+    assert map_command_to_twin(RECIPE, "plating", "set_bath_temp", {"c": 26.0}) is None
+
+
+def test_map_set_rpm_returns_none():
+    assert map_command_to_twin(RECIPE, "drill", "set_rpm", {"spindle_rpm": 130000}) is None
+
+
+def test_is_high_risk_hold_lot():
+    assert is_high_risk(RECIPE, "line", "hold_lot", {"lot_id": "L1"}) is True
+
+
+def test_is_high_risk_scrap_lot():
+    assert is_high_risk(RECIPE, "line", "scrap_lot", {"lot_id": "L1"}) is True
+
+
+def test_is_high_risk_param_tune_within_threshold():
+    target = RECIPE.window("plating", "current_density_asd").target
+    assert is_high_risk(RECIPE, "plating", "set_current_density", {"asd": target}) is False
+
+
+def test_is_high_risk_param_tune_beyond_threshold():
+    window = RECIPE.window("plating", "current_density_asd")
+    assert is_high_risk(RECIPE, "plating", "set_current_density", {"asd": window.max}) is True
+
+
+def test_is_high_risk_maintenance_not_by_tune_threshold():
+    assert is_high_risk(RECIPE, "etch", "clean_nozzle", {"zone": 1}) is False
+
+
+def test_confidence_from_twin_none():
+    assert confidence_from_twin(None) == 0.5
+
+
+class _TwinStub:
+    def __init__(self, predictions):
+        self.predictions = predictions
+
+
+def test_confidence_from_twin_with_predictions():
+    preds = [
+        TwinObservation(t=0.0, tick=0, kind="thickness", y=25.0, yhat=25.0, q05=24.0, q95=26.0),
+        TwinObservation(t=1.0, tick=1, kind="thickness", y=30.0, yhat=25.0, q05=24.0, q95=26.0),
+    ]
+    assert confidence_from_twin(_TwinStub(preds)) == 0.5
