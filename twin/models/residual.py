@@ -3,8 +3,10 @@ from sklearn.ensemble import GradientBoostingRegressor
 
 
 class ResidualQuantiles:
-    def __init__(self, seed: int) -> None:
+    def __init__(self, seed: int, n_estimators: int = 1, max_depth: int = 1) -> None:
         self._seed = seed
+        self._n_estimators = n_estimators
+        self._max_depth = max_depth
         self.ready = False
         self._models: dict[float, GradientBoostingRegressor] | None = None
 
@@ -18,8 +20,8 @@ class ResidualQuantiles:
             model = GradientBoostingRegressor(
                 loss="quantile",
                 alpha=alpha,
-                n_estimators=40,
-                max_depth=2,
+                n_estimators=self._n_estimators,
+                max_depth=self._max_depth,
                 random_state=self._seed,
             )
             model.fit(X, y)

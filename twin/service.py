@@ -76,7 +76,11 @@ class TwinService:
         self.client_id = "twin"
         self.state = ProcessState()
         self.predictions: list[TwinObservation] = []
-        self._rls = {kind: RlsGain() for kind in _KINDS}
+        self._rls = {
+            "thickness": RlsGain(lam=0.93),
+            "width": RlsGain(),
+            "roughness": RlsGain(),
+        }
         self._residual = {kind: ResidualQuantiles(seed=seed) for kind in _KINDS}
         self._resid_x: dict[str, list[list[float]]] = {kind: [] for kind in _KINDS}
         self._resid_y: dict[str, list[float]] = {kind: [] for kind in _KINDS}

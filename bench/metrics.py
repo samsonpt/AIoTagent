@@ -1,6 +1,8 @@
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 from bench.schema import TraceStore
 
 PIPELINE_LATENCY_S = 3 * 1800.0
@@ -28,6 +30,24 @@ class FprResult:
 
 def _ratio(num: int, den: int) -> float:
     return num / den if den else float("nan")
+
+
+def mape(y: np.ndarray, yhat: np.ndarray) -> float:
+    y = np.asarray(y, dtype=float)
+    yhat = np.asarray(yhat, dtype=float)
+    mask = np.abs(y) >= 1e-9
+    if not np.any(mask):
+        return float("nan")
+    return float(np.mean(np.abs(yhat[mask] - y[mask]) / np.abs(y[mask])) * 100.0)
+
+
+def coverage90(y: np.ndarray, q05: np.ndarray, q95: np.ndarray) -> float:
+    y = np.asarray(y, dtype=float)
+    q05 = np.asarray(q05, dtype=float)
+    q95 = np.asarray(q95, dtype=float)
+    if y.size == 0:
+        return float("nan")
+    return float(np.mean((y >= q05) & (y <= q95)))
 
 
 def fpy(store: TraceStore) -> float:

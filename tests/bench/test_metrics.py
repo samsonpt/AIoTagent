@@ -1,8 +1,18 @@
 import math
 
+import numpy as np
 import pytest
 
-from bench.metrics import PHYSICAL_FAULT_TYPES, PIPELINE_LATENCY_S, FprResult, fpr, fpy, scrap_rate
+from bench.metrics import (
+    PHYSICAL_FAULT_TYPES,
+    PIPELINE_LATENCY_S,
+    FprResult,
+    coverage90,
+    fpr,
+    fpy,
+    mape,
+    scrap_rate,
+)
 from bench.schema import FaultRecord, PanelRecord, TraceStore
 from sim.faults import FAULT_DEFECT_LINKS
 
@@ -132,3 +142,26 @@ def test_cross_process_ratio_uses_per_defect_cause(store):
     store.record_panel(panel)
     store.record_panel(make_panel("L0002-P01", defects=[("open", "etch")], root="etch"))
     assert fpr(store).cross_process_ratio == pytest.approx(1 / 2)
+
+
+def test_mape_perfect_prediction_is_zero():
+    y = np.array([10.0, 20.0, 30.0])
+    assert mape(y, y) == 0.0
+
+
+def test_mape_skips_near_zero_targets():
+    y = np.array([10.0, 1e-12, 20.0])
+    yhat = np.array([11.0, 100.0, 22.0])
+    assert mape(y, yhat) == pytest.approx(10.0)
+
+
+def test_coverage90_all_inside_interval_is_one():
+    y = np.array([1.0, 2.0, 3.0])
+    assert coverage90(y, y - 1.0, y + 1.0) == 1.0
+
+
+def test_coverage90_partial_hits():
+    y = np.array([0.0, 5.0, 10.0])
+    q05 = np.array([-1.0, 6.0, 9.0])
+    q95 = np.array([1.0, 7.0, 11.0])
+    assert coverage90(y, q05, q95) == pytest.approx(2 / 3)
