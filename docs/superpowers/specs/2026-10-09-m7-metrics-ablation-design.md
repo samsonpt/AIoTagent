@@ -188,3 +188,15 @@ python scripts/run_matrix.py --llm fake --scenarios additive_depletion \
 - **演示看板**（`demo_live.py` / Streamlit）：仍用 `auto_approve=False`，由 UI 人工审批，不自动消费 pending。
 
 §2 决策表「审批」行与 §3 数据流中的 `auto_approve=False` 以上述为准，矩阵侧以 `True` 为正式行为。
+
+### 9.2 指标数据源（2026-10-09，MVP）
+
+`bench/metrics_spec.md` 第 4 节为权威说明。相对原稿的取舍：
+
+| 指标 | MVP 行为 |
+|------|----------|
+| `unplanned_downtime_s` | 已接受 `line_stop` 累加 `params.duration_s`，缺省 1800 秒；不用 `episode_log.t_recover` |
+| `drill_break_count` | 只计 `fault_type = drill_break`，不另计磨损导致的断针 |
+| `bit_life_utilization` | 取自 `bit_change` 的 params 与同设备 telemetry，不读 `panel.drill` |
+| `twin_recalibration_s` | 只对 `sensor_drift` 计时 |
+| FPR `t_correct` | 已恢复时用 `t_start + MTTC`；否则回退 `t_cleared` / `t_end` / `+∞`（约定 2） |
