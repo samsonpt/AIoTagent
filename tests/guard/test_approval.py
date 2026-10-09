@@ -65,7 +65,7 @@ def test_approval_delay_and_seed_stable():
     human.on_tick(clock)
     decided = [r for r in store.list_approvals() if r["request_id"] == rid][0]
     assert decided["status"] in ("approved", "rejected")
-    assert decided["decider"] == "human"
+    assert decided["decider"] == "human_model"
     assert decided["t_decide"] == clock.now
 
     # Same seed → same first RNG draw → same decision

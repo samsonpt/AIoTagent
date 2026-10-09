@@ -82,7 +82,7 @@ class HumanModel:
                 row["request_id"],
                 status=status,
                 t_decide=clock.now,
-                decider="human",
+                decider="human_model",
                 reason=reason,
             )
             self.guard.resolve_approval(row["request_id"], approved, reason)
