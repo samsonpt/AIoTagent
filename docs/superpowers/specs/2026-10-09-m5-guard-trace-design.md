@@ -1,7 +1,7 @@
 # M5 Guard、审批与哈希链追溯设计规格
 
 **日期：** 2026-10-09  
-**状态：** 待审阅  
+**状态：** 已批准  
 **父规格：** `docs/superpowers/specs/2026-10-08-pcb-aiot-agent-design.md` §4.6、§6、§7.5、§10 M5  
 **相关 ADR：** ADR-006（SQLite 哈希链）、ADR-003（孪生隔离）
 
