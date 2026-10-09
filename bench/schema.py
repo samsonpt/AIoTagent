@@ -1,8 +1,11 @@
 import dataclasses
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+
+GENESIS = "GENESIS"
 
 SOURCES = ("edge", "peer", "cloud", "human", "rule")
 HANDLERS = ("edge", "cloud", "human")
@@ -95,6 +98,15 @@ CREATE TABLE IF NOT EXISTS episode_log (
     t_decide REAL, t_execute REAL, t_recover REAL, violated INTEGER, detail TEXT
 );
 CREATE TABLE IF NOT EXISTS telemetry (t REAL, process TEXT, equipment TEXT, key TEXT, value REAL);
+CREATE TABLE IF NOT EXISTS approval_queue (
+    request_id TEXT PRIMARY KEY, t_submit REAL, process TEXT, equipment TEXT, command TEXT,
+    params TEXT, source TEXT, lot_id TEXT, topic TEXT, status TEXT, t_decide REAL, decider TEXT,
+    reason TEXT
+);
+CREATE TABLE IF NOT EXISTS trace_chain (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, lot_id TEXT, kind TEXT, ref TEXT, t REAL, payload TEXT,
+    prev_hash TEXT, entry_hash TEXT
+);
 """
 
 _ORDER = {
@@ -103,6 +115,8 @@ _ORDER = {
     "action_log": "action_id",
     "episode_log": "t_detect, episode_id",
     "telemetry": "rowid",
+    "approval_queue": "t_submit, request_id",
+    "trace_chain": "seq",
 }
 
 _JSON_FIELDS = {"params", "drill", "plating", "etch", "defects", "detail"}
@@ -111,6 +125,10 @@ _BOOL_FIELDS = {"scrapped", "accepted", "overridden", "rolled_back", "violated"}
 
 def _dumps(obj) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False)
+
+
+def _chain_hash(prev_hash: str, payload: str) -> str:
+    return hashlib.sha256((prev_hash + "\n" + payload).encode("utf-8")).hexdigest()
 
 
 def _encode(rec, exclude: tuple[str, ...] = ()) -> tuple[list[str], list]:
@@ -148,6 +166,7 @@ class TraceStore:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self._approval_seq = 0
 
     def _insert(self, table: str, rec, *, replace: bool = False, exclude: tuple[str, ...] = ()) -> int:
         names, values = _encode(rec, exclude)
@@ -205,6 +224,151 @@ class TraceStore:
         if rec.handler not in HANDLERS:
             raise ValueError(f"未知处置方: {rec.handler}")
         self._insert("episode_log", rec, replace=True)
+        if rec.t_decide is not None:
+            lot_id = rec.detail.get("lot_id", "default")
+            self.append_chain(
+                lot_id=lot_id,
+                kind="decide",
+                ref=rec.episode_id,
+                t=rec.t_decide or rec.t_detect,
+                payload={
+                    "episode_id": rec.episode_id,
+                    "process": rec.process,
+                    "trigger": rec.trigger,
+                    "handler": rec.handler,
+                    "t_detect": rec.t_detect,
+                    "t_decide": rec.t_decide,
+                    "t_execute": rec.t_execute,
+                    "t_recover": rec.t_recover,
+                    "violated": rec.violated,
+                    "detail": rec.detail,
+                },
+            )
+
+    def enqueue_approval(
+        self,
+        *,
+        t_submit: float,
+        process: str,
+        equipment: str,
+        command: str,
+        params: dict,
+        source: str,
+        lot_id: str,
+        topic: str,
+    ) -> str:
+        self._approval_seq += 1
+        request_id = f"apr-{self._approval_seq}"
+        with self._conn:
+            self._conn.execute(
+                """INSERT INTO approval_queue (
+                    request_id, t_submit, process, equipment, command, params, source,
+                    lot_id, topic, status, t_decide, decider, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    request_id,
+                    t_submit,
+                    process,
+                    equipment,
+                    command,
+                    _dumps(params),
+                    source,
+                    lot_id,
+                    topic,
+                    "pending",
+                    None,
+                    None,
+                    None,
+                ),
+            )
+        return request_id
+
+    def list_approvals(self, status: str | None = None) -> list[dict]:
+        if status is None:
+            rows = self._conn.execute(
+                "SELECT * FROM approval_queue ORDER BY t_submit, request_id"
+            )
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM approval_queue WHERE status = ? ORDER BY t_submit, request_id",
+                (status,),
+            )
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["params"] = json.loads(item["params"])
+            result.append(item)
+        return result
+
+    def update_approval(
+        self,
+        request_id: str,
+        *,
+        status: str | None = None,
+        t_decide: float | None = None,
+        decider: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        self._update(
+            "approval_queue",
+            "request_id",
+            request_id,
+            {"status": status, "t_decide": t_decide, "decider": decider, "reason": reason},
+        )
+
+    def append_chain(
+        self,
+        *,
+        lot_id: str,
+        kind: str,
+        ref: str,
+        t: float,
+        payload: dict,
+    ) -> str:
+        row = self._conn.execute(
+            "SELECT entry_hash FROM trace_chain WHERE lot_id = ? ORDER BY seq DESC LIMIT 1",
+            (lot_id,),
+        ).fetchone()
+        prev_hash = row["entry_hash"] if row else GENESIS
+        payload_str = _dumps(payload)
+        entry_hash = _chain_hash(prev_hash, payload_str)
+        with self._conn:
+            self._conn.execute(
+                """INSERT INTO trace_chain (
+                    lot_id, kind, ref, t, payload, prev_hash, entry_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (lot_id, kind, ref, t, payload_str, prev_hash, entry_hash),
+            )
+        return entry_hash
+
+    def verify_chain(self, lot_id: str | None = None) -> tuple[bool, str]:
+        if lot_id is None:
+            lot_ids = [
+                row[0]
+                for row in self._conn.execute(
+                    "SELECT DISTINCT lot_id FROM trace_chain ORDER BY lot_id"
+                )
+            ]
+            for lid in lot_ids:
+                ok, reason = self.verify_chain(lid)
+                if not ok:
+                    return False, reason
+            return True, ""
+
+        rows = self._conn.execute(
+            "SELECT seq, lot_id, ref, payload, prev_hash, entry_hash FROM trace_chain "
+            "WHERE lot_id = ? ORDER BY seq",
+            (lot_id,),
+        ).fetchall()
+        expected_prev = GENESIS
+        for row in rows:
+            if row["prev_hash"] != expected_prev:
+                return False, f"lot {lot_id} seq {row['seq']}: prev_hash mismatch"
+            computed = _chain_hash(row["prev_hash"], row["payload"])
+            if computed != row["entry_hash"]:
+                return False, f"lot {lot_id} seq {row['seq']}: entry_hash mismatch"
+            expected_prev = row["entry_hash"]
+        return True, ""
 
     def record_telemetry(self, t: float, process: str, equipment: str, values: dict[str, float]) -> None:
         with self._conn:

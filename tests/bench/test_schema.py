@@ -245,8 +245,19 @@ def test_dump_deterministic_for_same_sequence():
         write_sequence(b)
         dumped = a.dump()
         assert dumped == b.dump()
-    assert set(dumped) == {"fault_truth", "panel_lineage", "action_log", "episode_log", "telemetry"}
-    assert all(dumped[name] for name in dumped)
+    assert set(dumped) == {
+        "fault_truth",
+        "panel_lineage",
+        "action_log",
+        "episode_log",
+        "telemetry",
+        "approval_queue",
+        "trace_chain",
+    }
+    assert all(
+        dumped[name]
+        for name in ("fault_truth", "panel_lineage", "action_log", "episode_log", "telemetry")
+    )
     assert all(isinstance(row, tuple) for rows in dumped.values() for row in rows)
 
 
@@ -263,3 +274,94 @@ def test_file_database_persists_after_reopen(tmp_path):
 def test_file_database_uses_wal(tmp_path):
     with TraceStore(tmp_path / "trace.db") as s:
         assert s._conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_trace_chain_tamper_detected():
+    store = TraceStore()
+    store.append_chain(lot_id="L1", kind="act", ref="a1", t=0.0, payload={"command": "stop"})
+    store.append_chain(lot_id="L1", kind="act", ref="a2", t=1.0, payload={"command": "resume"})
+    assert store.verify_chain("L1")[0] is True
+    store._conn.execute(
+        "UPDATE trace_chain SET payload = ? WHERE ref = 'a1'", ['{"command":"hacked"}']
+    )
+    store._conn.commit()
+    ok, reason = store.verify_chain("L1")
+    assert ok is False and reason
+
+
+def test_trace_chain_genesis_prev_hash():
+    store = TraceStore()
+    store.append_chain(lot_id="L1", kind="act", ref="a1", t=0.0, payload={"command": "stop"})
+    row = store._conn.execute(
+        "SELECT prev_hash FROM trace_chain WHERE ref = 'a1'"
+    ).fetchone()
+    assert row["prev_hash"] == "GENESIS"
+
+
+def test_enqueue_and_update_approval(store):
+    rid = store.enqueue_approval(
+        t_submit=100.0,
+        process="etch",
+        equipment="ETC-01",
+        command="hold_lot",
+        params={"lot_id": "L0001"},
+        source="edge",
+        lot_id="L0001",
+        topic="plant/etch/ETC-01/command",
+    )
+    assert rid.startswith("apr-")
+    pending = store.list_approvals(status="pending")
+    assert len(pending) == 1
+    assert pending[0]["request_id"] == rid
+    assert pending[0]["status"] == "pending"
+    assert pending[0]["params"] == {"lot_id": "L0001"}
+    store.update_approval(
+        rid, status="approved", t_decide=1900.0, decider="human_model", reason="ok"
+    )
+    assert store.list_approvals(status="pending") == []
+    approved = store.list_approvals(status="approved")
+    assert len(approved) == 1
+    assert approved[0]["t_decide"] == 1900.0
+    assert approved[0]["decider"] == "human_model"
+
+
+def test_record_episode_appends_decide_chain(store):
+    rec = make_episode(
+        "E010",
+        t_detect=300.0,
+        t_decide=310.0,
+        handler="human",
+        detail={"lot_id": "L0001", "action": "hold"},
+    )
+    store.record_episode(rec)
+    rows = store._conn.execute(
+        "SELECT kind, ref, lot_id FROM trace_chain ORDER BY seq"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "decide"
+    assert rows[0]["ref"] == "E010"
+    assert rows[0]["lot_id"] == "L0001"
+    assert store.verify_chain("L0001")[0] is True
+
+
+def test_record_episode_no_chain_without_t_decide(store):
+    store.record_episode(make_episode("E011", t_detect=300.0))
+    rows = store._conn.execute("SELECT * FROM trace_chain").fetchall()
+    assert len(rows) == 0
+
+
+def test_dump_includes_approval_and_chain(store):
+    store.enqueue_approval(
+        t_submit=1.0,
+        process="etch",
+        equipment="ETC-01",
+        command="hold_lot",
+        params={},
+        source="edge",
+        lot_id="L1",
+        topic="plant/etch/ETC-01/command",
+    )
+    store.append_chain(lot_id="L1", kind="act", ref="x1", t=2.0, payload={"command": "stop"})
+    dumped = store.dump()
+    assert "approval_queue" in dumped
+    assert "trace_chain" in dumped
