@@ -14,9 +14,13 @@ def make(*faults: dict, **kwargs):
     return Plant(scenario, bus, store, clock), bus, store, clock
 
 
-def send(bus, process, command, params=None, source="edge", reason="test"):
+def send(bus, process, command, params=None, source="edge", reason="test", guarded=True, guard_id="guard"):
     topic = topics.line_command() if process == "line" else topics.command(process)
-    bus.publish(topic, {"command": command, "params": params or {}, "source": source, "reason": reason}, "edge")
+    payload = {"command": command, "params": params or {}, "source": source, "reason": reason}
+    if guarded:
+        payload["guarded"] = True
+        payload["guard_id"] = guard_id
+    bus.publish(topic, payload, "edge")
 
 
 def steps(plant, n=1):
@@ -32,6 +36,15 @@ def test_command_category_covers_all_station_commands():
     assert COMMAND_CATEGORY["resume"] == "line_stop"
     assert COMMAND_CATEGORY["hold_lot"] == "lot_hold"
     assert COMMAND_CATEGORY["scrap_lot"] == "scrap"
+
+
+def test_unguarded_command_discarded():
+    plant, bus, store, _ = make()
+    topic = topics.command("plating")
+    bus.publish(topic, {"command": "set_current_density", "params": {"asd": 2.2}, "source": "edge", "reason": "x"}, "edge")
+    steps(plant, 2)
+    assert store.actions() == []
+    assert plant.stations["plating"].current_density_asd == 2.0
 
 
 def test_command_queued_until_next_tick():

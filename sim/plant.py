@@ -167,6 +167,8 @@ class Plant:
         self._commands.put((topic, payload))
 
     def _execute(self, topic: str, payload: dict) -> None:
+        if payload.get("guarded") is not True or payload.get("guard_id") != "guard":
+            return
         levels = topic.split("/")
         process = levels[1]
         equipment = "line" if process == "line" else levels[2]
