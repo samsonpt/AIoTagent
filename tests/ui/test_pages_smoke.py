@@ -9,12 +9,14 @@ import pytest
 
 pytest.importorskip("pandas")
 
-from bench.schema import TraceStore
+from bench.schema import EpisodeRecord, PanelRecord, TraceStore
 from ui.db import DashboardStore
+from ui.pages.aoi import build_defect_summary
 from ui.pages.approvals import (
     build_approval_table,
     resolve_t_decide,
 )
+from ui.pages.episodes import build_episode_table
 from ui.pages.monitor import build_telemetry_frame
 from ui.pages.trace import build_chain_table
 
@@ -160,3 +162,52 @@ def test_import_app_module():
     assert app.parse_db_arg(["streamlit", "run", "ui/app.py", "--", "--db", "x.db"]) == "x.db"
     assert app.parse_db_arg(["--db", "y.db"]) == "y.db"
     assert app.parse_db_arg([]) is None
+
+
+def test_build_defect_summary():
+    panels = [
+        PanelRecord(
+            panel_id="P1",
+            lot_id="L1",
+            part_no="PN",
+            t_release=0.0,
+            t_aoi=1.0,
+            drill={},
+            plating={},
+            etch={},
+            defects=[{"type": "open"}, {"type": "short"}, {"type": "open"}],
+            root_cause_truth="drill_wear",
+            scrapped=False,
+        )
+    ]
+    df = build_defect_summary(panels)
+    assert list(df.columns) == [
+        "panel_id",
+        "lot_id",
+        "part_no",
+        "t_aoi",
+        "n_defects",
+        "defect_types",
+        "root_cause_truth",
+        "scrapped",
+    ]
+    assert int(df.iloc[0]["n_defects"]) == 3
+    assert df.iloc[0]["defect_types"] == "open,short"
+
+
+def test_build_episode_table():
+    eps = [
+        EpisodeRecord(
+            episode_id="e1",
+            process="etch",
+            trigger="spc",
+            t_detect=1.0,
+            handler="edge",
+            t_decide=2.0,
+            violated=False,
+        )
+    ]
+    df = build_episode_table(eps)
+    assert df.iloc[0]["episode_id"] == "e1"
+    assert df.iloc[0]["handler"] == "edge"
+    assert build_episode_table([]).empty

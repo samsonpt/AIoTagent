@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from ui.db import DashboardStore
-from ui.pages import approvals, monitor, trace
+from ui.pages import aoi, approvals, episodes, monitor, trace, twin
 
 _PAGES = ("审批", "追溯", "监视", "AOI", "推理链", "孪生")
 _DEFAULT_DB = "runs/demo.db"
@@ -33,11 +33,13 @@ def main() -> None:
         st.title("AIoT 看板")
         db_path = st.text_input("SQLite 路径", value=cli_db or _DEFAULT_DB)
         page = st.radio("页面", _PAGES, index=0)
-        t_decide_raw = st.number_input(
-            "t_decide（空则用 telemetry.max）",
-            value=float("nan"),
+        override_t = st.checkbox("覆盖 t_decide", value=False)
+        t_decide_input = st.number_input(
+            "t_decide",
+            value=0.0,
             format="%.3f",
-            help="NaN 表示未注入，回退库内仿真时间",
+            disabled=not override_t,
+            help="勾选后使用此值；否则回退库内 telemetry.max",
         )
         if st.button("刷新"):
             st.rerun()
@@ -54,7 +56,7 @@ def main() -> None:
         else:
             st.error(f"链完整性告警: {reason}")
 
-        t_decide = None if t_decide_raw != t_decide_raw else float(t_decide_raw)
+        t_decide = float(t_decide_input) if override_t else None
 
         if page == "审批":
             approvals.render(store, t_decide=t_decide)
@@ -63,14 +65,11 @@ def main() -> None:
         elif page == "监视":
             monitor.render(store)
         elif page == "AOI":
-            st.subheader("AOI")
-            st.info("骨架页：Task 5 实现缺陷面板视图")
+            aoi.render(store)
         elif page == "推理链":
-            st.subheader("推理链")
-            st.info("骨架页：Task 5 实现 episode 视图")
+            episodes.render(store)
         else:
-            st.subheader("孪生")
-            st.info("骨架页：Task 5 实现孪生对比视图")
+            twin.render(store)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ISOLATED_PACKAGES = ("twin", "edge", "cloud", "guard")
+ISOLATED_PACKAGES = ("twin", "edge", "cloud", "guard", "ui")
 FORBIDDEN = "sim"
 
 
