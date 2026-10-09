@@ -1,7 +1,7 @@
 # M6 Streamlit 看板设计规格
 
 **日期：** 2026-10-09  
-**状态：** 待审阅  
+**状态：** 已批准  
 **父规格：** `docs/superpowers/specs/2026-10-08-pcb-aiot-agent-design.md` §4.7、§6、§10 M6  
 **相关：** M5 `2026-10-09-m5-guard-trace-design.md`；ADR-006
 
