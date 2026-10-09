@@ -12,6 +12,7 @@ from common.bus import Bus, InMemoryBus
 from common.clock import SimClock
 from common.config import AblationConfig, load_ablation
 from common.recipe import load_recipe
+from cloud.orchestrator import CloudOrchestrator
 from edge.factory import make_controllers
 from sim.faults import Scenario, load_scenario
 from sim.plant import Plant
@@ -52,16 +53,18 @@ def run(
         recipe_path = Path(scenario.recipe_path)
         recipe = load_recipe(recipe_path if recipe_path.is_absolute() else ROOT / recipe_path)
         extra = [*make_controllers(ablation, bus, recipe, clock, store, scenario.seed), *extra]
+        twin = None
         if ablation.use_twin_lookahead and ablation.twin_fidelity != "none":
-            extra.append(
-                TwinService(
-                    bus,
-                    recipe,
-                    clock,
-                    fidelity=ablation.twin_fidelity,
-                    seed=scenario.seed,
-                )
+            twin = TwinService(
+                bus,
+                recipe,
+                clock,
+                fidelity=ablation.twin_fidelity,
+                seed=scenario.seed,
             )
+            extra.append(twin)
+        if ablation.use_cloud:
+            extra.append(CloudOrchestrator.from_ablation(ablation, bus, recipe, clock, store, twin))
     for _ in range(scenario.n_ticks if n_ticks is None else n_ticks):
         plant.step_tick()
         for controller in extra:
