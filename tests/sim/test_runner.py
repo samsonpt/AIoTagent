@@ -103,7 +103,14 @@ def test_last_tick_command_is_recorded():
             if clock.tick == 3:
                 bus.publish(
                     topics.command("drill"),
-                    {"command": "stop", "params": {}, "source": "edge", "reason": "末拍"},
+                    {
+                        "command": "stop",
+                        "params": {},
+                        "source": "edge",
+                        "reason": "末拍",
+                        "guarded": True,
+                        "guard_id": "guard",
+                    },
                     "edge-drill",
                 )
 

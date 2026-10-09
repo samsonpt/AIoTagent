@@ -15,6 +15,7 @@ def make_controllers(
     clock: SimClock,
     store: TraceStore | None,
     seed: int,
+    guard=None,
 ) -> list:
     shared = dict(
         bus=bus,
@@ -26,9 +27,25 @@ def make_controllers(
         seed=seed,
     )
     if ablation.use_edge_agent:
-        return [ProcessEdgeAgent(process, emit_commands=True, **shared) for process in PROCESSES]
+        agents = [ProcessEdgeAgent(process, emit_commands=True, **shared) for process in PROCESSES]
+        if ablation.use_human_gate and store is not None and guard is not None:
+            agents.append(
+                HumanModel(
+                    bus,
+                    recipe,
+                    clock,
+                    store=store,
+                    guard=guard,
+                    seed=seed,
+                    ocap=False,
+                )
+            )
+        return agents
     agents = [
         ProcessEdgeAgent(process, emit_commands=False, **{**shared, "feedforward": False})
         for process in PROCESSES
     ]
-    return [*agents, HumanModel(bus, recipe, clock)]
+    human_kwargs: dict = {"ocap": True}
+    if ablation.use_human_gate and store is not None and guard is not None:
+        human_kwargs.update(store=store, guard=guard, seed=seed)
+    return [*agents, HumanModel(bus, recipe, clock, **human_kwargs)]
