@@ -19,8 +19,8 @@ _SPEC_BY_KIND = {
     "roughness": "hole_roughness_um",
 }
 _SIGMA_MECH = {
-    "thickness": 0.4,
-    "width": 0.7,
+    "thickness": 0.55,
+    "width": 0.85,
     "roughness": 0.5,
 }
 _Z90 = 1.645
@@ -77,8 +77,8 @@ class TwinService:
         self.state = ProcessState()
         self.predictions: list[TwinObservation] = []
         self._rls = {
-            "thickness": RlsGain(lam=0.93),
-            "width": RlsGain(),
+            "thickness": RlsGain(lam=0.9),
+            "width": RlsGain(lam=0.92),
             "roughness": RlsGain(),
         }
         self._residual = {kind: ResidualQuantiles(seed=seed) for kind in _KINDS}
@@ -205,15 +205,15 @@ class TwinService:
         theta = self._rls[kind].theta
         mean_scaled = mech * theta
         residual = self._residual[kind]
+        half = _Z90 * _SIGMA_MECH[kind]
         if self.fidelity == "hybrid" and residual.ready:
             features = np.asarray([self._features(mech)], dtype=float)
             q05_r, q50_r, q95_r = residual.predict(features)
             mean = mean_scaled + float(q50_r[0])
-            q05 = mean_scaled + float(q05_r[0])
-            q95 = mean_scaled + float(q95_r[0])
+            q05 = min(mean_scaled + float(q05_r[0]), mean - half)
+            q95 = max(mean_scaled + float(q95_r[0]), mean + half)
         else:
             mean = mean_scaled
-            half = _Z90 * _SIGMA_MECH[kind]
             q05 = mean - half
             q95 = mean + half
         spec = self.recipe.specs[_SPEC_BY_KIND[kind]]

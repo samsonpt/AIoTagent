@@ -3,7 +3,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 
 
 class ResidualQuantiles:
-    def __init__(self, seed: int, n_estimators: int = 1, max_depth: int = 1) -> None:
+    def __init__(self, seed: int, n_estimators: int = 40, max_depth: int = 2) -> None:
         self._seed = seed
         self._n_estimators = n_estimators
         self._max_depth = max_depth
