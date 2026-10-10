@@ -2,8 +2,16 @@ import math
 
 import pytest
 
+pytest.importorskip("pandas")
+
 from bench.schema import TraceStore, TwinGateRecord, TwinObservationRecord
 from ui.db import DashboardStore
+from ui.pages.twin import (
+    build_gate_table,
+    build_observation_chart_frame,
+    build_residual_frame,
+    filter_observations,
+)
 
 
 def test_rolling_mape_and_coverage():
@@ -81,6 +89,60 @@ def test_twin_gates_filter_and_limit(db_path):
         assert len(passed) == 2
         assert all(r.passed for r in passed)
         assert passed[-1].t == 4.0
+
+
+def test_filter_observations_by_kind_and_lot():
+    rows = [
+        TwinObservationRecord(
+            t=0.0, tick=0, kind="thickness", y=1.0, yhat=1.0, q05=0.0, q95=2.0, lot_id="L1"
+        ),
+        TwinObservationRecord(
+            t=1.0, tick=1, kind="width", y=2.0, yhat=2.0, q05=1.0, q95=3.0, lot_id="L2"
+        ),
+    ]
+    assert len(filter_observations(rows, kind="thickness")) == 1
+    assert filter_observations(rows, lot_id="L2")[0].kind == "width"
+    assert len(filter_observations(rows, kind="width", lot_id="L1")) == 0
+
+
+def test_build_observation_and_residual_frames():
+    rows = [
+        TwinObservationRecord(
+            t=0.0, tick=0, kind="k", y=10.0, yhat=9.0, q05=8.0, q95=12.0, lot_id="L1"
+        )
+    ]
+    chart = build_observation_chart_frame(rows)
+    assert list(chart.columns) == ["t", "y", "yhat", "q05", "q95"]
+    assert float(chart.iloc[0]["y"]) == 10.0
+    residual = build_residual_frame(rows)
+    assert float(residual.iloc[0]["residual"]) == 1.0
+
+
+def test_build_gate_table():
+    gates = [
+        TwinGateRecord(
+            t=1.0,
+            tick=1,
+            process="plating",
+            command="dosing",
+            kind="thickness",
+            confidence=0.8,
+            yield_prob=0.9,
+            oos_prob=0.1,
+            passed=False,
+            reason="confidence_low",
+            lot_id="L1",
+        )
+    ]
+    df = build_gate_table(gates)
+    assert df.iloc[0]["reason"] == "confidence_low"
+    assert df.iloc[0]["passed"] == False
+
+
+def test_twin_page_importable():
+    from ui.pages.twin import render
+
+    assert callable(render)
 
 
 @pytest.fixture
