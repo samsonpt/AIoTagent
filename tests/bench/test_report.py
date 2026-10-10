@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from bench.report import (
+    DEFAULT_HUMAN_MODEL_NOTES,
     bootstrap_ci,
     holm_correct,
     main,
@@ -192,5 +193,8 @@ def test_run_matrix_writes_report_when_results_exist(tmp_path, monkeypatch):
     )
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "表 IV" in report
+    assert DEFAULT_HUMAN_MODEL_NOTES in report
+    assert "900" in report and "0.9" in report
+    assert "立即放行" not in report
     assert (tmp_path / "summary_by_config.csv").is_file()
     assert (tmp_path / "comparisons.csv").is_file()

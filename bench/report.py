@@ -17,8 +17,10 @@ META_COLUMNS = frozenset({"cell_id", "scenario", "config", "seed", "status", "er
 MAIN_CONFIGS = ("baseline_rule", "edge_only", "full")
 TABLE_IV_METRICS = ("es", "arg", "fpr", "caf")
 DEFAULT_HUMAN_MODEL_NOTES = (
-    "矩阵以 auto_approve=True 运行，HumanModel 立即放行待审批动作；"
-    "构造参数默认 delay_ticks=2、approval_delay_s=900，自动放行时不引入审批延迟。"
+    "矩阵以 auto_approve=True 运行，HumanModel 按 §7.5 处理 Guard 待审批："
+    "自 t_submit 起等待 approval_delay_s=900 仿真秒（15 分钟）后决策；"
+    "动作工序与当前活动真值故障根因一致时以 0.9 概率批准，否则以 0.9 概率驳回。"
+    "默认 delay_ticks=2 仅用于 OCAP/SPC 响应，不缩短审批延迟。"
 )
 
 _SUMMARY_FIELDS = ("metric", "n", "mean", "ci_lo", "ci_hi")
