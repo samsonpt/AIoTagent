@@ -63,6 +63,7 @@ def run(
                 clock,
                 fidelity=ablation.twin_fidelity,
                 seed=scenario.seed,
+                store=store,
             )
         guard = ActionGuard(bus, store, recipe, clock, twin, scenario.seed, ablation)
         extra = [

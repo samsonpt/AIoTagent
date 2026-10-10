@@ -67,12 +67,15 @@ def _oos_prob(mean: float, q05: float, q95: float, spec) -> float:
 class TwinService:
     client_id = "twin"
 
-    def __init__(self, bus, recipe, clock, *, fidelity: str = "hybrid", seed: int = 0):
+    def __init__(
+        self, bus, recipe, clock, *, fidelity: str = "hybrid", seed: int = 0, store=None
+    ):
         self.bus = bus
         self.recipe = recipe
         self.clock = clock
         self.fidelity = fidelity
         self.seed = seed
+        self.store = store
         self.client_id = "twin"
         self.state = ProcessState()
         self.predictions: list[TwinObservation] = []
@@ -239,18 +242,32 @@ class TwinService:
                 np.asarray(self._resid_x[kind], dtype=float),
                 np.asarray(self._resid_y[kind], dtype=float),
             )
-        self.predictions.append(
-            TwinObservation(
-                t=self.clock.now,
-                tick=self.clock.tick,
-                kind=kind,
-                y=y,
-                yhat=float(pred.mean),
-                q05=float(pred.q05),
-                q95=float(pred.q95),
-                lot_id=params.get("lot_id"),
-            )
+        obs = TwinObservation(
+            t=self.clock.now,
+            tick=self.clock.tick,
+            kind=kind,
+            y=y,
+            yhat=float(pred.mean),
+            q05=float(pred.q05),
+            q95=float(pred.q95),
+            lot_id=params.get("lot_id"),
         )
+        self.predictions.append(obs)
+        if self.store is not None:
+            from bench.schema import TwinObservationRecord
+
+            self.store.record_twin_observation(
+                TwinObservationRecord(
+                    t=obs.t,
+                    tick=obs.tick,
+                    kind=obs.kind,
+                    y=obs.y,
+                    yhat=obs.yhat,
+                    q05=obs.q05,
+                    q95=obs.q95,
+                    lot_id=obs.lot_id,
+                )
+            )
 
     def _mechanistic(self, params: dict, kind: str) -> float:
         if kind == "thickness":
