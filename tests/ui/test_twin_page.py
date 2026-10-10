@@ -27,6 +27,16 @@ def test_rolling_mape_nan_when_no_valid_points():
     assert math.isnan(rolling_mape(rows, 1))
 
 
+def test_rolling_mape_skips_near_zero_y():
+    from ui.pages.twin import rolling_mape
+
+    rows = [
+        TwinObservationRecord(t=0.0, tick=0, kind="k", y=1e-10, yhat=1.0, q05=0.0, q95=1.0),
+        TwinObservationRecord(t=1.0, tick=1, kind="k", y=10.0, yhat=9.0, q05=8.0, q95=12.0),
+    ]
+    assert rolling_mape(rows, 2) == pytest.approx(10.0)
+
+
 def test_twin_observations_limit(db_path):
     with TraceStore(db_path) as store:
         for i in range(10):

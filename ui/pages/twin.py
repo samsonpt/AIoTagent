@@ -39,7 +39,7 @@ def rolling_mape(rows: list, window: int) -> float:
     for row in slice_rows:
         y = _numeric(getattr(row, "y", None))
         yhat = _numeric(getattr(row, "yhat", None))
-        if y is None or yhat is None or y == 0.0:
+        if y is None or yhat is None or abs(y) < 1e-9:
             continue
         errors.append(abs(y - yhat) / abs(y))
     if not errors:
