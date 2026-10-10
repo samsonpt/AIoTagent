@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 
-from bench.schema import SOURCES, ActionRecord
+from bench.schema import SOURCES, ActionRecord, TwinGateRecord
 from common import topics
 from common.config import AblationConfig
 from common.topics import EQUIPMENT, PROCESSES
@@ -144,6 +144,17 @@ class ActionGuard:
             twin_reason = (
                 "twin_disabled" if not self._ablation.use_twin_lookahead else "no_twin"
             )
+            self._log_twin_gate(
+                process=process,
+                command=command,
+                kind=None,
+                confidence=None,
+                yield_prob=None,
+                oos_prob=None,
+                passed=False,
+                reason=twin_reason,
+                lot_id=lot_id,
+            )
             if self._ablation.use_human_gate:
                 needs_approval = True
             elif not is_high_risk(self._recipe, process, command, params):
@@ -154,20 +165,66 @@ class ActionGuard:
             mapped = map_command_to_twin(self._recipe, process, command, params)
             if mapped is None:
                 logger.warning("twin map skip command=%s process=%s", command, process)
+                self._log_twin_gate(
+                    process=process,
+                    command=command,
+                    kind=None,
+                    confidence=None,
+                    yield_prob=None,
+                    oos_prob=None,
+                    passed=False,
+                    reason="map_skip",
+                    lot_id=lot_id,
+                )
             else:
                 kind, sim_params = mapped
                 if self._ablation.use_twin_confidence_gate:
                     confidence = confidence_from_twin(self._twin)
                     if confidence < 0.5:
+                        self._log_twin_gate(
+                            process=process,
+                            command=command,
+                            kind=kind,
+                            confidence=confidence,
+                            yield_prob=None,
+                            oos_prob=None,
+                            passed=False,
+                            reason="confidence_low",
+                            lot_id=lot_id,
+                        )
                         needs_approval = True
                     elif self._twin is not None:
                         pred = self._twin.simulate(sim_params, kind=kind)
-                        if not passes_twin_gate(pred, confidence):
+                        gate_passed = passes_twin_gate(pred, confidence)
+                        self._log_twin_gate(
+                            process=process,
+                            command=command,
+                            kind=kind,
+                            confidence=confidence,
+                            yield_prob=pred.yield_prob,
+                            oos_prob=pred.oos_prob,
+                            passed=gate_passed,
+                            reason="passed" if gate_passed else "gate_fail",
+                            lot_id=lot_id,
+                        )
+                        if not gate_passed:
                             needs_approval = True
                 elif self._twin is not None:
                     confidence = 1.0
                     pred = self._twin.simulate(sim_params, kind=kind)
-                    if not passes_twin_gate(pred, confidence):
+                    gate_passed = passes_twin_gate(pred, confidence)
+                    self._log_twin_gate(
+                        process=process,
+                        command=command,
+                        kind=kind,
+                        confidence=confidence,
+                        yield_prob=pred.yield_prob,
+                        oos_prob=pred.oos_prob,
+                        passed=gate_passed,
+                        reason="passed" if gate_passed else "gate_fail",
+                        lot_id=lot_id,
+                    )
+                    if not gate_passed:
                         needs_approval = True
 
         # Gate 3 -- human / high-risk
@@ -252,6 +309,37 @@ class ActionGuard:
             source=source,
             lot_id=lot_id,
             topic=topic,
+        )
+
+    def _log_twin_gate(
+        self,
+        *,
+        process: str,
+        command: str,
+        kind: str | None,
+        confidence: float | None,
+        yield_prob: float | None,
+        oos_prob: float | None,
+        passed: bool,
+        reason: str,
+        lot_id: str,
+        detail: dict | None = None,
+    ) -> None:
+        self._store.record_twin_gate(
+            TwinGateRecord(
+                t=self._clock.now,
+                tick=self._clock.tick,
+                process=process,
+                command=command,
+                kind=kind,
+                confidence=confidence,
+                yield_prob=yield_prob,
+                oos_prob=oos_prob,
+                passed=passed,
+                reason=reason,
+                lot_id=lot_id,
+                detail=detail or {},
+            )
         )
 
     def _record(
