@@ -11,6 +11,8 @@ from bench.schema import (
     FaultRecord,
     PanelRecord,
     TraceStore,
+    TwinGateRecord,
+    TwinObservationRecord,
 )
 
 
@@ -253,6 +255,8 @@ def test_dump_deterministic_for_same_sequence():
         "telemetry",
         "approval_queue",
         "trace_chain",
+        "twin_observation",
+        "twin_gate_log",
     }
     assert all(
         dumped[name]
@@ -396,6 +400,28 @@ def test_dump_includes_approval_and_chain(store):
     dumped = store.dump()
     assert "approval_queue" in dumped
     assert "trace_chain" in dumped
+
+
+def test_twin_observation_and_gate_roundtrip():
+    with TraceStore() as store:
+        oid = store.record_twin_observation(
+            TwinObservationRecord(
+                t=1.0, tick=1, kind="thickness", y=25.0, yhat=24.5, q05=23.0, q95=26.0, lot_id="L1",
+            )
+        )
+        assert oid >= 1
+        rows = store.twin_observations(kind="thickness", lot_id="L1")
+        assert len(rows) == 1 and rows[0].y == 25.0 and rows[0].yhat == 24.5
+        gid = store.record_twin_gate(
+            TwinGateRecord(
+                t=2.0, tick=2, process="plating", command="set_asd", kind="thickness",
+                confidence=0.8, yield_prob=0.9, oos_prob=0.1, passed=True, reason="passed",
+                lot_id="L1", detail={"asd": 2.0},
+            )
+        )
+        assert gid >= 1
+        gates = store.twin_gates(passed=True)
+        assert len(gates) == 1 and gates[0].reason == "passed"
 
 
 def test_unapplied_decisions_and_mark():

@@ -80,6 +80,36 @@ class EpisodeRecord:
     detail: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class TwinObservationRecord:
+    t: float
+    tick: int
+    kind: str
+    y: float
+    yhat: float
+    q05: float
+    q95: float
+    lot_id: str | None = None
+    id: int | None = None
+
+
+@dataclass(frozen=True)
+class TwinGateRecord:
+    t: float
+    tick: int
+    process: str
+    command: str
+    kind: str | None
+    confidence: float | None
+    yield_prob: float | None
+    oos_prob: float | None
+    passed: bool
+    reason: str
+    lot_id: str | None = None
+    detail: dict = field(default_factory=dict)
+    id: int | None = None
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS fault_truth (
     fault_id TEXT PRIMARY KEY, process TEXT, equipment TEXT, fault_type TEXT, params TEXT,
@@ -108,6 +138,15 @@ CREATE TABLE IF NOT EXISTS trace_chain (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, lot_id TEXT, kind TEXT, ref TEXT, t REAL, payload TEXT,
     prev_hash TEXT, entry_hash TEXT
 );
+CREATE TABLE IF NOT EXISTS twin_observation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, tick INTEGER, kind TEXT, y REAL, yhat REAL,
+    q05 REAL, q95 REAL, lot_id TEXT
+);
+CREATE TABLE IF NOT EXISTS twin_gate_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, tick INTEGER, process TEXT, command TEXT,
+    kind TEXT, confidence REAL, yield_prob REAL, oos_prob REAL, passed INTEGER, reason TEXT,
+    lot_id TEXT, detail TEXT
+);
 """
 
 _ORDER = {
@@ -118,10 +157,12 @@ _ORDER = {
     "telemetry": "rowid",
     "approval_queue": "t_submit, request_id",
     "trace_chain": "seq",
+    "twin_observation": "t, id",
+    "twin_gate_log": "t, id",
 }
 
 _JSON_FIELDS = {"params", "drill", "plating", "etch", "defects", "detail"}
-_BOOL_FIELDS = {"scrapped", "accepted", "overridden", "rolled_back", "violated"}
+_BOOL_FIELDS = {"scrapped", "accepted", "overridden", "rolled_back", "violated", "passed"}
 
 
 def _dumps(obj) -> str:
@@ -416,6 +457,40 @@ class TraceStore:
 
     def episodes(self) -> list[EpisodeRecord]:
         return self._select("episode_log", EpisodeRecord)
+
+    def record_twin_observation(self, rec: TwinObservationRecord) -> int:
+        return self._insert("twin_observation", rec, exclude=("id",))
+
+    def twin_observations(
+        self, *, kind: str | None = None, lot_id: str | None = None
+    ) -> list[TwinObservationRecord]:
+        clauses, params = [], []
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if lot_id is not None:
+            clauses.append("lot_id = ?")
+            params.append(lot_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM twin_observation{where} ORDER BY {_ORDER['twin_observation']}", params
+        )
+        return [_decode(TwinObservationRecord, row) for row in rows]
+
+    def record_twin_gate(self, rec: TwinGateRecord) -> int:
+        return self._insert("twin_gate_log", rec, exclude=("id",))
+
+    def twin_gates(self, *, passed: bool | None = None) -> list[TwinGateRecord]:
+        if passed is None:
+            rows = self._conn.execute(
+                f"SELECT * FROM twin_gate_log ORDER BY {_ORDER['twin_gate_log']}"
+            )
+        else:
+            rows = self._conn.execute(
+                f"SELECT * FROM twin_gate_log WHERE passed = ? ORDER BY {_ORDER['twin_gate_log']}",
+                (int(passed),),
+            )
+        return [_decode(TwinGateRecord, row) for row in rows]
 
     def telemetry(self, process: str | None = None, key: str | None = None) -> list[tuple[float, str, str, str, float]]:
         clauses, params = [], []
