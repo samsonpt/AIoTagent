@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -43,6 +44,11 @@ def main(argv: list[str] | None = None) -> None:
         default=_DEFAULT_SCENARIO,
         help="场景 YAML 路径",
     )
+    parser.add_argument(
+        "--no-cloud",
+        action="store_true",
+        help="关闭云端编排（无 DeepSeek 调用，演示更快）",
+    )
     args = parser.parse_args(argv)
 
     db_path = Path(args.db)
@@ -58,15 +64,29 @@ def main(argv: list[str] | None = None) -> None:
     if not scenario_path.is_absolute():
         scenario_path = ROOT / scenario_path
 
+    scenario = load_scenario(scenario_path)
+    n_ticks = scenario.n_ticks if args.ticks == 0 else args.ticks
+    ablation = AblationConfig(use_cloud=not args.no_cloud)
+
+    cloud_mode = "off"
+    if ablation.use_cloud:
+        cloud_mode = "deepseek" if os.environ.get("DEEPSEEK_API_KEY") else "fake-llm"
+    print(
+        f"demo_live: ticks={n_ticks} db={db_path} cloud={cloud_mode} auto_approve=False",
+        flush=True,
+    )
+    if cloud_mode == "deepseek":
+        print("提示：含 DeepSeek 调用时 48 tick 约需 2–3 分钟，请等待末尾 JSON 摘要。", flush=True)
+
     with TraceStore(db_path) as store:
         summary = run(
-            load_scenario(scenario_path),
+            scenario,
             store,
-            ablation=AblationConfig(),
+            ablation=ablation,
             auto_approve=False,
-            n_ticks=None if args.ticks == 0 else args.ticks,
+            n_ticks=n_ticks,
         )
-    print(summary_json(summary))
+    print(summary_json(summary), flush=True)
 
 
 if __name__ == "__main__":
