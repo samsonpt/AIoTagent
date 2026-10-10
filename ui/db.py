@@ -59,6 +59,20 @@ class DashboardStore:
     def episodes(self) -> list:
         return self._store.episodes()
 
+    def twin_observations(
+        self, *, kind: str | None = None, lot_id: str | None = None, limit: int = 500
+    ) -> list:
+        rows = self._store.twin_observations(kind=kind, lot_id=lot_id)
+        if limit is not None and len(rows) > limit:
+            return rows[-limit:]
+        return rows
+
+    def twin_gates(self, *, passed: bool | None = None, limit: int = 500) -> list:
+        rows = self._store.twin_gates(passed=passed)
+        if limit is not None and len(rows) > limit:
+            return rows[-limit:]
+        return rows
+
     def close(self) -> None:
         self._store.close()
 
